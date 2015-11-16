@@ -141,6 +141,14 @@
             </modules>
         </profile>
 
+        <!-- Build H.264 support only if explicitly requested -->
+        <profile>
+            <id>h264-support</id>
+            <modules>
+                <module>guacamole-video-h264</module>
+            </modules>
+        </profile>
+
     </profiles>
 
 </project>

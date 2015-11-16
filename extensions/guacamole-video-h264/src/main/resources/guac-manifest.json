@@ -1,0 +1,22 @@
+{
+
+    "guacamoleVersion" : "*",
+
+    "name"      : "H264 support (Broadway) for Apache Guacamole",
+    "namespace" : "guac-h264",
+
+    "js" : [
+        "lib/broadway/Decoder.js",
+        "lib/broadway/Player.js",
+        "lib/broadway/YUVCanvas.js",
+        "js/loadBroadway.js"
+    ],
+
+    "resources" : {
+        "lib/broadway/avc.wasm" : "application/wasm",
+        "lib/broadway/Decoder.js" : "text/javascript",
+        "lib/broadway/Player.js" : "text/javascript",
+        "lib/broadway/YUVCanvas.js" : "text/javascript"
+    }
+
+}
