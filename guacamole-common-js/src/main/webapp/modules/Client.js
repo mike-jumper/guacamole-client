@@ -1499,6 +1499,13 @@ Guacamole.Client = function(tunnel) {
                         audioPlayer.sync();
                 }
 
+                // Synchronize all video players
+                for (var index in videoPlayers) {
+                    var videoPlayer = videoPlayers[index];
+                    if (videoPlayer)
+                        videoPlayer.sync();
+                }
+
                 // Send sync response to server
                 if (timestamp !== currentTimestamp) {
                     tunnel.sendMessage("sync", timestamp);
