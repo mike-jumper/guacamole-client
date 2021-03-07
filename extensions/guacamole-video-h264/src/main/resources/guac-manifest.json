@@ -6,10 +6,13 @@
     "namespace" : "guac-h264",
 
     "js" : [
+
         "lib/broadway/Decoder.js",
-        "lib/broadway/Player.js",
         "lib/broadway/YUVCanvas.js",
+        "lib/broadway/Player.js",
+
         "js/loadBroadway.js"
+
     ],
 
     "resources" : {
