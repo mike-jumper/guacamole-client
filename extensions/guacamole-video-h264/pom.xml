@@ -32,11 +32,60 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <broadway.commit>d32f9deb2c39f15ba3f9ec5105f5cd31e244bd2d</broadway.commit>
     </properties>
 
     <build>
+
+        <!-- Clone Broadway H264 library from git -->
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-scm-plugin</artifactId>
+                <version>1.11.2</version>
+                <executions>
+                    <execution>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>checkout</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <connectionUrl>scm:git:https://github.com/mbebenita/Broadway</connectionUrl>
+                    <scmVersionType>revision</scmVersionType>
+                    <scmVersion>${broadway.commit}</scmVersion>
+                    <checkoutDirectory>${project.build.directory}/broadway</checkoutDirectory>
+                </configuration>
+            </plugin>
         </plugins>
+
+        <!-- Include only required player portion of Broadway library -->
+        <resources>
+            <resource>
+                <directory>${basedir}/src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.build.directory}/broadway</directory>
+                <targetPath>lib/broadway</targetPath>
+                <includes>
+                    <include>LICENSE</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>${project.build.directory}/broadway/Player</directory>
+                <targetPath>lib/broadway</targetPath>
+                <includes>
+                    <include>*.js</include>
+                    <include>*.wasm</include>
+                </includes>
+                <excludes>
+                    <exclude>mp4.js</exclude>
+                    <exclude>stream.js</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
     </build>
 
 </project>
