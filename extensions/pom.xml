@@ -51,6 +51,9 @@
         <module>guacamole-auth-saml</module>
         <module>guacamole-auth-totp</module>
 
+        <!-- Utility extensions -->
+        <module>guacamole-display-statistics</module>
+
     </modules>
 
     <build>
