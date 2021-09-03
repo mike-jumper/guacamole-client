@@ -793,8 +793,14 @@ Guacamole.Client = function(tunnel) {
      * has sent any results.
      * 
      * @event
-     * @param {Number} timestamp The timestamp associated with the sync
-     *                           instruction.
+     * @param {!number} timestamp
+     *     The timestamp associated with the sync instruction.
+     *
+     * @param {!number} frames
+     *     The number of frames that were considered or combined to produce the
+     *     frame associated with this sync instruction, or zero if this value
+     *     is not known or the remote desktop server provides no concept of
+     *     frames.
      */
     this.onsync = null;
 
@@ -1481,6 +1487,7 @@ Guacamole.Client = function(tunnel) {
         "sync": function(parameters) {
 
             var timestamp = parseInt(parameters[0]);
+            var frames = parameters[1] ? parseInt(parameters[1]) : 0;
 
             // Flush display, send sync when done
             display.flush(function displaySyncComplete() {
@@ -1498,7 +1505,7 @@ Guacamole.Client = function(tunnel) {
                     currentTimestamp = timestamp;
                 }
 
-            });
+            }, timestamp, frames);
 
             // If received first update, no longer waiting.
             if (currentState === STATE_WAITING)
@@ -1506,7 +1513,7 @@ Guacamole.Client = function(tunnel) {
 
             // Call sync handler if defined
             if (guac_client.onsync)
-                guac_client.onsync(timestamp);
+                guac_client.onsync(timestamp, frames);
 
         },
 
