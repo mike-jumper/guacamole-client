@@ -34,21 +34,6 @@ public enum GuacamoleProtocolCapability {
     ARBITRARY_HANDSHAKE_ORDER(GuacamoleProtocolVersion.VERSION_1_1_0),
     
     /**
-     * Support for the "msg" instruction. The "msg" instruction allows the
-     * server to send messages to the client. Support for this instruction was
-     * introduced in {@link GuacamoleProtocolVersion#VERSION_1_5_0}.
-     */
-    MSG_INSTRUCTION(GuacamoleProtocolVersion.VERSION_1_5_0),
-    
-    /**
-     * Support for the "name" handshake instruction, allowing clients to send
-     * the name of the Guacamole user to be passed to guacd and associated with
-     * connections. Support for this instruction was introduced in
-     * {@link GuacamoleProtocolVersion#VERSION_1_5_0}.
-     */
-    NAME_HANDSHAKE(GuacamoleProtocolVersion.VERSION_1_5_0),
-    
-    /**
      * Negotiation of Guacamole protocol version between client and server
      * during the protocol handshake. The ability to negotiate protocol
      * versions was introduced in
@@ -72,8 +57,23 @@ public enum GuacamoleProtocolCapability {
      * forwarding the client timezone was introduced in
      * {@link GuacamoleProtocolVersion#VERSION_1_1_0}.
      */
-    TIMEZONE_HANDSHAKE(GuacamoleProtocolVersion.VERSION_1_1_0);
+    TIMEZONE_HANDSHAKE(GuacamoleProtocolVersion.VERSION_1_1_0),
     
+    /**
+     * Support for the "msg" instruction. The "msg" instruction allows the
+     * server to send messages to the client. Support for this instruction was
+     * introduced in {@link GuacamoleProtocolVersion#VERSION_1_5_0}.
+     */
+    MSG_INSTRUCTION(GuacamoleProtocolVersion.VERSION_1_5_0),
+
+    /**
+     * Support for the "name" handshake instruction, allowing clients to send
+     * the name of the Guacamole user to be passed to guacd and associated with
+     * connections. Support for this instruction was introduced in
+     * {@link GuacamoleProtocolVersion#VERSION_1_5_0}.
+     */
+    NAME_HANDSHAKE(GuacamoleProtocolVersion.VERSION_1_5_0);
+
     /**
      * The minimum protocol version required to support this capability.
      */
