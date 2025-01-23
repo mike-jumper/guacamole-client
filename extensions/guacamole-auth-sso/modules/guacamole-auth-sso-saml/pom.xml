@@ -134,8 +134,8 @@
 
                 <!--
                     Replace slightly older commons-codec (1.15) with newer
-                    and identical version to that used by Apache Directory API
-                    for LDAP (1.17.1) so that we don't need two copies of the
+                    and compatible version to that used by Apache Directory API
+                    for LDAP (1.17.2) so that we don't need two copies of the
                     same license information.
                 -->
                 <exclusion>
@@ -157,7 +157,7 @@
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
-            <version>1.17.1</version>
+            <version>1.17.2</version>
         </dependency>
 
     </dependencies>
