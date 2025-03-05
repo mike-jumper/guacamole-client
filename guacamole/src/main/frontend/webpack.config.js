@@ -99,7 +99,8 @@ module.exports = {
             new ClosureWebpackPlugin({ mode: 'STANDARD' }, {
                 languageIn: 'ECMASCRIPT_2020',
                 languageOut: 'ECMASCRIPT5',
-                compilationLevel: 'SIMPLE'
+                compilationLevel: 'SIMPLE',
+                strictModeInput: false
             }),
 
             new CssMinimizerPlugin()
