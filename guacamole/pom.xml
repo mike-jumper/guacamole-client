@@ -136,61 +136,15 @@
                 </executions>
             </plugin>
 
-            <!-- Automatically SBOM for Maven dependencies -->
-            <plugin>
-                <groupId>org.cyclonedx</groupId>
-                <artifactId>cyclonedx-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>generate-maven-sbom</id>
-                        <phase>generate-resources</phase>
-                    </execution>
-                </executions>
-            </plugin>
-
+            <!-- Automatically generate LICENSE and NOTICE -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <executions>
-
-                    <!-- Automatically generate LICENSE and NOTICE -->
                     <execution>
                         <id>generate-license-files</id>
                         <phase>generate-resources</phase>
                     </execution>
-
-                    <!-- Combine SBOMs for Maven and NPM dependencies into single SBOM -->
-                    <execution>
-                        <id>combine-json-sboms</id>
-                        <phase>generate-resources</phase>
-                        <configuration>
-                            <executable>util/combine-sboms.sh</executable>
-                            <arguments>
-                                <argument>${project.build.directory}/sboms/bom.json</argument>
-                                <argument>${project.build.directory}/maven-sboms/bom.json</argument>
-                                <argument>src/main/frontend/dist/npm-sboms/bom.json</argument>
-                            </arguments>
-                        </configuration>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>combine-xml-sboms</id>
-                        <phase>generate-resources</phase>
-                        <configuration>
-                            <executable>util/combine-sboms.sh</executable>
-                            <arguments>
-                                <argument>${project.build.directory}/sboms/bom.xml</argument>
-                                <argument>${project.build.directory}/maven-sboms/bom.xml</argument>
-                                <argument>src/main/frontend/dist/npm-sboms/bom.xml</argument>
-                            </arguments>
-                        </configuration>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                    </execution>
-
                 </executions>
             </plugin>
 
@@ -225,7 +179,7 @@
                             </includes>
                         </resource>
 
-                        <!-- Include all licenses and SBOMs within META-INF -->
+                        <!-- Include all licenses and SBOMs (if generated) within META-INF -->
                         <resource>
                             <directory>${project.build.directory}/licenses</directory>
                             <targetPath>META-INF</targetPath>
@@ -430,5 +384,82 @@
         </dependency>
 
     </dependencies>
+
+    <profiles>
+
+        <!-- Generate SBOM files if "generateSBOMs" is set to "true" -->
+        <profile>
+            <id>generate-sboms</id>
+            <activation>
+                <property>
+                    <name>generateSBOMs</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+
+                    <!-- Automatically SBOM for Maven dependencies -->
+                    <plugin>
+                        <groupId>org.cyclonedx</groupId>
+                        <artifactId>cyclonedx-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>generate-maven-sbom</id>
+                                <phase>generate-resources</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+
+                            <!-- Automatically generate LICENSE and NOTICE -->
+                            <execution>
+                                <id>generate-license-files</id>
+                                <phase>generate-resources</phase>
+                            </execution>
+
+                            <!-- Combine SBOMs for Maven and NPM dependencies into single SBOM -->
+                            <execution>
+                                <id>combine-json-sboms</id>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <executable>util/combine-sboms.sh</executable>
+                                    <arguments>
+                                        <argument>${project.build.directory}/sboms/bom.json</argument>
+                                        <argument>${project.build.directory}/maven-sboms/bom.json</argument>
+                                        <argument>src/main/frontend/dist/npm-sboms/bom.json</argument>
+                                    </arguments>
+                                </configuration>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>combine-xml-sboms</id>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <executable>util/combine-sboms.sh</executable>
+                                    <arguments>
+                                        <argument>${project.build.directory}/sboms/bom.xml</argument>
+                                        <argument>${project.build.directory}/maven-sboms/bom.xml</argument>
+                                        <argument>src/main/frontend/dist/npm-sboms/bom.xml</argument>
+                                    </arguments>
+                                </configuration>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                            </execution>
+
+                        </executions>
+                    </plugin>
+
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

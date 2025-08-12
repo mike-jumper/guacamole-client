@@ -184,27 +184,6 @@
                 </executions>
             </plugin>
 
-            <!-- Automatically generate SBOMs for Maven runtime dependencies -->
-            <plugin>
-                <groupId>org.cyclonedx</groupId>
-                <artifactId>cyclonedx-maven-plugin</artifactId>
-                <version>2.9.1</version>
-                <executions>
-                    <execution>
-                        <id>generate-maven-sbom</id>
-                        <phase>generate-resources</phase>
-                        <configuration>
-                            <includeProvidedScope>false</includeProvidedScope>
-                            <includeSystemScope>false</includeSystemScope>
-                            <outputDirectory>${sbom.directory}</outputDirectory>
-                        </configuration>
-                        <goals>
-                            <goal>makeBom</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
             <!-- Automatically verify build sanity -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -600,6 +579,42 @@
             </build>
         </profile>
 
+        <!-- Generate SBOM files if "generateSBOMs" is set to "true" -->
+        <profile>
+            <id>generate-sboms</id>
+            <activation>
+                <property>
+                    <name>generateSBOMs</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+
+                    <!-- Automatically generate SBOMs for Maven runtime dependencies -->
+                    <plugin>
+                        <groupId>org.cyclonedx</groupId>
+                        <artifactId>cyclonedx-maven-plugin</artifactId>
+                        <version>2.9.1</version>
+                        <executions>
+                            <execution>
+                                <id>generate-maven-sbom</id>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <includeProvidedScope>false</includeProvidedScope>
+                                    <includeSystemScope>false</includeSystemScope>
+                                    <outputDirectory>${sbom.directory}</outputDirectory>
+                                </configuration>
+                                <goals>
+                                    <goal>makeBom</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 
 </project>
