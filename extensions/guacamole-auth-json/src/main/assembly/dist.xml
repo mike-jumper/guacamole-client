@@ -40,6 +40,12 @@
             <directory>target/licenses</directory>
         </fileSet>
 
+        <!-- Include SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>sboms</outputDirectory>
+            <directory>target/maven-sboms</directory>
+        </fileSet>
+
         <!-- Include reference implementation -->
         <fileSet>
             <outputDirectory>doc</outputDirectory>

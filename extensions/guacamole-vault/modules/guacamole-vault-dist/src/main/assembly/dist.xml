@@ -43,12 +43,20 @@
 
     </dependencySets>
 
-    <!-- Licenses -->
     <fileSets>
+
+        <!-- Licenses -->
         <fileSet>
             <outputDirectory></outputDirectory>
             <directory>target/licenses</directory>
         </fileSet>
+
+        <!-- Include SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>sboms</outputDirectory>
+            <directory>target/maven-sboms</directory>
+        </fileSet>
+
     </fileSets>
 
 </assembly>

@@ -71,6 +71,12 @@
             <directory>target/licenses</directory>
         </fileSet>
 
+        <!-- Include SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>sboms</outputDirectory>
+            <directory>target/maven-sboms</directory>
+        </fileSet>
+
         <!-- MySQL schema scripts -->
         <fileSet>
             <outputDirectory>mysql/schema</outputDirectory>
