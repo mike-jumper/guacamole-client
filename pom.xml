@@ -52,6 +52,10 @@
             (for LICENSE generation) -->
         <dependency.list.directory>${project.build.directory}/dependencies</dependency.list.directory>
 
+        <!-- The directory that should receive all SBOMs generated for Maven
+            dependencies -->
+        <sbom.directory>${project.build.directory}/maven-sboms</sbom.directory>
+
         <!-- Set to "true" to ignore errors that occur during automatic LICENSE
             file generation (such as non-existent license documentation) as
             well as errors that occur during the RAT check (such as incorrect
@@ -175,6 +179,27 @@
                         </configuration>
                         <goals>
                             <goal>list</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Automatically generate SBOMs for Maven runtime dependencies -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>2.9.1</version>
+                <executions>
+                    <execution>
+                        <id>generate-maven-sbom</id>
+                        <phase>generate-resources</phase>
+                        <configuration>
+                            <includeProvidedScope>false</includeProvidedScope>
+                            <includeSystemScope>false</includeSystemScope>
+                            <outputDirectory>${sbom.directory}</outputDirectory>
+                        </configuration>
+                        <goals>
+                            <goal>makeBom</goal>
                         </goals>
                     </execution>
                 </executions>
