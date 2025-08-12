@@ -22,6 +22,7 @@ const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 const ClosureWebpackPlugin = require('closure-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
+const { CycloneDxWebpackPlugin } = require('@cyclonedx/webpack-plugin');
 const DependencyListPlugin = require('./plugins/dependency-list-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
@@ -170,6 +171,13 @@ module.exports = {
         // List all bundled node modules for sake of automatic LICENSE file
         // generation / sanity checks
         new DependencyListPlugin(),
+
+        // Generate SBOM for JavaScript dependencies in CycloneDX format
+        new CycloneDxWebpackPlugin({
+            context: '../',
+            outputLocation: './npm-sboms',
+            includeWellknown: false
+        }),
 
         // Automatically require used modules
         new webpack.ProvidePlugin({

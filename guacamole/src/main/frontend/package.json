@@ -26,6 +26,7 @@
     "devDependencies": {
         "@babel/core": "^7.24.7",
         "@babel/preset-env": "^7.24.7",
+        "@cyclonedx/webpack-plugin": "^2.0.2",
         "babel-loader": "^8.3.0",
         "clean-webpack-plugin": "^4.0.0",
         "closure-webpack-plugin": "^2.6.1",
