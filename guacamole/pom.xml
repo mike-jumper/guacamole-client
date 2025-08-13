@@ -407,6 +407,12 @@
                             <execution>
                                 <id>generate-maven-sbom</id>
                                 <phase>generate-resources</phase>
+                                <configuration>
+                                    <projectType>application</projectType>
+                                    <includeProvidedScope>false</includeProvidedScope>
+                                    <includeSystemScope>false</includeSystemScope>
+                                    <outputDirectory>${sbom.directory}</outputDirectory>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
