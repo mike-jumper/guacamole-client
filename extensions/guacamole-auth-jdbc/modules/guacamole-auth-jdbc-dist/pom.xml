@@ -29,6 +29,13 @@
     <name>guacamole-auth-jdbc-dist</name>
     <url>http://guacamole.apache.org/</url>
 
+    <properties>
+
+        <!-- Override default SBOM name to avoid "-dist" suffix -->
+        <sbom.name>guacamole-auth-jdbc-${project.version}.cdx</sbom.name>
+
+    </properties>
+
     <parent>
         <groupId>org.apache.guacamole</groupId>
         <artifactId>guacamole-auth-jdbc</artifactId>

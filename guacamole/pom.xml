@@ -412,6 +412,7 @@
                                     <includeProvidedScope>false</includeProvidedScope>
                                     <includeSystemScope>false</includeSystemScope>
                                     <outputDirectory>${sbom.directory}</outputDirectory>
+                                    <outputName>${sbom.name}</outputName>
                                 </configuration>
                             </execution>
                         </executions>
@@ -435,8 +436,8 @@
                                 <configuration>
                                     <executable>util/combine-sboms.sh</executable>
                                     <arguments>
-                                        <argument>${project.build.directory}/sboms/bom.json</argument>
-                                        <argument>${project.build.directory}/maven-sboms/bom.json</argument>
+                                        <argument>${project.build.directory}/sboms/${sbom.name}.json</argument>
+                                        <argument>${project.build.directory}/maven-sboms/${sbom.name}.json</argument>
                                         <argument>src/main/frontend/dist/npm-sboms/bom.json</argument>
                                     </arguments>
                                 </configuration>
@@ -450,8 +451,8 @@
                                 <configuration>
                                     <executable>util/combine-sboms.sh</executable>
                                     <arguments>
-                                        <argument>${project.build.directory}/sboms/bom.xml</argument>
-                                        <argument>${project.build.directory}/maven-sboms/bom.xml</argument>
+                                        <argument>${project.build.directory}/sboms/${sbom.name}.xml</argument>
+                                        <argument>${project.build.directory}/maven-sboms/${sbom.name}.xml</argument>
                                         <argument>src/main/frontend/dist/npm-sboms/bom.xml</argument>
                                     </arguments>
                                 </configuration>

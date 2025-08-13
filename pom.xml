@@ -56,6 +56,10 @@
             dependencies -->
         <sbom.directory>${project.build.directory}/maven-sboms</sbom.directory>
 
+        <!-- The base name that should be given to SBOM files (excluding ".json"
+            or ".xml" extension) -->
+        <sbom.name>${project.artifactId}-${project.version}.cdx</sbom.name>
+
         <!-- Set to "true" to ignore errors that occur during automatic LICENSE
             file generation (such as non-existent license documentation) as
             well as errors that occur during the RAT check (such as incorrect
@@ -604,6 +608,7 @@
                                     <includeProvidedScope>false</includeProvidedScope>
                                     <includeSystemScope>false</includeSystemScope>
                                     <outputDirectory>${sbom.directory}</outputDirectory>
+                                    <outputName>${sbom.name}</outputName>
                                 </configuration>
                                 <goals>
                                     <goal>makeBom</goal>

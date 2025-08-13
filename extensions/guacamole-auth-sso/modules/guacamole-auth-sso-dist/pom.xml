@@ -36,6 +36,13 @@
         <relativePath>../../</relativePath>
     </parent>
 
+    <properties>
+
+        <!-- Override default SBOM name to avoid "-dist" suffix -->
+        <sbom.name>guacamole-auth-sso-${project.version}.cdx</sbom.name>
+
+    </properties>
+
     <dependencies>
 
         <!-- CAS Authentication Extension -->
