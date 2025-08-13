@@ -71,25 +71,43 @@
             <directory>target/licenses</directory>
         </fileSet>
 
-        <!-- Include SBOMs (if generated) -->
+        <!-- MySQL schema scripts, license information, and SBOMs (if generated) -->
         <fileSet>
-            <outputDirectory>sboms</outputDirectory>
-            <directory>target/sboms</directory>
+            <outputDirectory>mysql</outputDirectory>
+            <directory>../guacamole-auth-jdbc-mysql/target/licenses</directory>
         </fileSet>
-
-        <!-- MySQL schema scripts -->
+        <fileSet>
+            <outputDirectory>mysql/sboms</outputDirectory>
+            <directory>../guacamole-auth-jdbc-mysql/target/sboms</directory>
+        </fileSet>
         <fileSet>
             <outputDirectory>mysql/schema</outputDirectory>
             <directory>../guacamole-auth-jdbc-mysql/schema</directory>
         </fileSet>
 
-        <!-- PostgreSQL schema scripts -->
+        <!-- PostgreSQL schema scripts, license information, and SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>postgresql</outputDirectory>
+            <directory>../guacamole-auth-jdbc-postgresql/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>postgresql/sboms</outputDirectory>
+            <directory>../guacamole-auth-jdbc-postgresql/target/sboms</directory>
+        </fileSet>
         <fileSet>
             <outputDirectory>postgresql/schema</outputDirectory>
             <directory>../guacamole-auth-jdbc-postgresql/schema</directory>
         </fileSet>
 
-        <!-- SQL Server schema scripts -->
+        <!-- SQL Server schema scripts, license information, and SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>sqlserver</outputDirectory>
+            <directory>../guacamole-auth-jdbc-sqlserver/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>sqlserver/sboms</outputDirectory>
+            <directory>../guacamole-auth-jdbc-sqlserver/target/sboms</directory>
+        </fileSet>
         <fileSet>
             <outputDirectory>sqlserver/schema</outputDirectory>
             <directory>../guacamole-auth-jdbc-sqlserver/schema</directory>

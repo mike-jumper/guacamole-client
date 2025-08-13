@@ -51,10 +51,14 @@
             <directory>target/licenses</directory>
         </fileSet>
 
-        <!-- Include SBOMs (if generated) -->
+        <!-- KSM extension license information and SBOMs (if generated) -->
         <fileSet>
-            <outputDirectory>sboms</outputDirectory>
-            <directory>target/sboms</directory>
+            <outputDirectory>ksm</outputDirectory>
+            <directory>../guacamole-vault-ksm/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>ksm/sboms</outputDirectory>
+            <directory>../guacamole-vault-ksm/target/sboms</directory>
         </fileSet>
 
     </fileSets>

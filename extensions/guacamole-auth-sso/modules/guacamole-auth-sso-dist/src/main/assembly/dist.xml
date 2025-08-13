@@ -79,10 +79,44 @@
             <directory>target/licenses</directory>
         </fileSet>
 
-        <!-- Include SBOMs (if generated) -->
+        <!-- CAS extension license information and SBOMs (if generated) -->
         <fileSet>
-            <outputDirectory>sboms</outputDirectory>
-            <directory>target/sboms</directory>
+            <outputDirectory>cas</outputDirectory>
+            <directory>../guacamole-auth-sso-cas/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>cas/sboms</outputDirectory>
+            <directory>../guacamole-auth-sso-cas/target/sboms</directory>
+        </fileSet>
+
+        <!-- OpenID extension license information and SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>openid</outputDirectory>
+            <directory>../guacamole-auth-sso-openid/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>openid/sboms</outputDirectory>
+            <directory>../guacamole-auth-sso-openid/target/sboms</directory>
+        </fileSet>
+
+        <!-- SAML extension license information and SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>saml</outputDirectory>
+            <directory>../guacamole-auth-sso-saml/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>saml/sboms</outputDirectory>
+            <directory>../guacamole-auth-sso-saml/target/sboms</directory>
+        </fileSet>
+
+        <!-- SSL extension license information and SBOMs (if generated) -->
+        <fileSet>
+            <outputDirectory>ssl</outputDirectory>
+            <directory>../guacamole-auth-sso-ssl/target/licenses</directory>
+        </fileSet>
+        <fileSet>
+            <outputDirectory>ssl/sboms</outputDirectory>
+            <directory>../guacamole-auth-sso-ssl/target/sboms</directory>
         </fileSet>
 
     </fileSets>
