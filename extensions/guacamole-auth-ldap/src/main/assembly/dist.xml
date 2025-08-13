@@ -53,7 +53,7 @@
         <!-- Include SBOMs (if generated) -->
         <fileSet>
             <outputDirectory>sboms</outputDirectory>
-            <directory>target/maven-sboms</directory>
+            <directory>target/sboms</directory>
         </fileSet>
 
         <!-- Include extension .jar -->

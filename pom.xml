@@ -54,7 +54,7 @@
 
         <!-- The directory that should receive all SBOMs generated for Maven
             dependencies -->
-        <sbom.directory>${project.build.directory}/maven-sboms</sbom.directory>
+        <sbom.directory>${project.build.directory}/sboms</sbom.directory>
 
         <!-- The base name that should be given to SBOM files (excluding ".json"
             or ".xml" extension) -->
