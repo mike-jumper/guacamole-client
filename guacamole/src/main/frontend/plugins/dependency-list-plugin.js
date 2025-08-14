@@ -76,6 +76,40 @@ class DependencyListPlugin {
     }
 
     /**
+     * Attempts to locate the NPM package that provided the given file. If no
+     * such package exists, undefined is returned.
+     *
+     * @private
+     * @param {string} file
+     *    The filename of the file whose NPM package should be located.
+     *
+     * @return {*}
+     *     The NPM package object associated with the given file, or undefined
+     *     if no such package exists.
+     */
+    static #findPackage(file) {
+
+        const moduleFinder = finder(file);
+
+        // Find first module associated with given file, which may not actually
+        // the module in question (some NPM dependencies may include multiple
+        // package.json files, with the relevant package.json being further up
+        // in the directory tree)
+        let currentModule = moduleFinder.next();
+
+        // Continue searching up through the directory tree until the relevant
+        // package.json file has been located (based on the presence of a
+        // declared name) OR until we run out of packages to check
+        while (!currentModule.done && !currentModule.value?.name)
+            currentModule = moduleFinder.next();
+
+        // This will either be a valid package object or undefined if no
+        // package could be located
+        return currentModule.value;
+
+    }
+
+    /**
      * Entrypoint for all Webpack plugins. This function will be invoked when
      * the plugin is being associated with the compile process.
      *
@@ -121,14 +155,13 @@ class DependencyListPlugin {
 
                 // Locate NPM package corresponding to file dependency (there
                 // may not be one)
-                const moduleFinder = finder(file);
-                const npmPackage = moduleFinder.next().value;
+                const npmPackage = DependencyListPlugin.#findPackage(file);
 
                 // Translate absolute path into more readable path relative to
                 // root of compilation process
                 const relativePath = path.relative(compiler.options.context, file);
 
-                if (npmPackage.name) {
+                if (npmPackage?.name) {
                     moduleCoords[npmPackage.name + ':' + npmPackage.version] = true;
                     logger.info('File dependency "%s" mapped to NPM package "%s" (v%s)',
                         relativePath, npmPackage.name, npmPackage.version);
