@@ -609,6 +609,7 @@
                                     <includeSystemScope>false</includeSystemScope>
                                     <outputDirectory>${sbom.directory}</outputDirectory>
                                     <outputName>${sbom.name}</outputName>
+                                    <outputFormat>json</outputFormat>
                                 </configuration>
                                 <goals>
                                     <goal>makeBom</goal>

@@ -171,7 +171,7 @@
                                 <exclude>translations/*.json</exclude>
                                 <exclude>index.html</exclude>
                                 <exclude>npm-dependencies.txt</exclude>
-                                <exclude>npm-sboms/*</exclude>
+                                <exclude>npm-sbom.json</exclude>
                                 <exclude>verifyCachedVersion.js</exclude>
                             </excludes>
                         </resource>
@@ -421,6 +421,7 @@
                                     <includeSystemScope>false</includeSystemScope>
                                     <outputDirectory>${sbom.directory}</outputDirectory>
                                     <outputName>${sbom.name}</outputName>
+                                    <outputFormat>json</outputFormat>
                                 </configuration>
                             </execution>
                         </executions>
@@ -439,29 +440,14 @@
 
                             <!-- Combine SBOMs for Maven and NPM dependencies into single SBOM -->
                             <execution>
-                                <id>combine-json-sboms</id>
+                                <id>combine-sboms</id>
                                 <phase>generate-resources</phase>
                                 <configuration>
                                     <executable>util/combine-sboms.sh</executable>
                                     <arguments>
                                         <argument>${project.build.directory}/sboms/${sbom.name}.json</argument>
                                         <argument>${sbom.directory}/${sbom.name}.json</argument>
-                                        <argument>src/main/frontend/dist/npm-sboms/bom.json</argument>
-                                    </arguments>
-                                </configuration>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                            </execution>
-                            <execution>
-                                <id>combine-xml-sboms</id>
-                                <phase>generate-resources</phase>
-                                <configuration>
-                                    <executable>util/combine-sboms.sh</executable>
-                                    <arguments>
-                                        <argument>${project.build.directory}/sboms/${sbom.name}.xml</argument>
-                                        <argument>${sbom.directory}/${sbom.name}.xml</argument>
-                                        <argument>src/main/frontend/dist/npm-sboms/bom.xml</argument>
+                                        <argument>src/main/frontend/dist/npm-sbom.json</argument>
                                     </arguments>
                                 </configuration>
                                 <goals>
