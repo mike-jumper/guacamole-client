@@ -25,18 +25,33 @@ var Guacamole = Guacamole || {};
  * however unlike the canvas element itself, drawing operations on a Layer are
  * guaranteed to run in order, even if such an operation must wait for an image
  * to load before completing.
- * 
+ *
+ * The canvas backing the Layer may be either an HTMLCanvasElement (within
+ * contexts that have access to the DOM) or an OffscreenCanvas (within contexts
+ * that do not, such as Web Workers). Which type of canvas is used depends on
+ * the execution context at construction time and can be overridden by passing
+ * an explicit backing canvas.
+ *
  * @constructor
- * 
+ *
  * @param {!number} width
  *     The width of the Layer, in pixels. The canvas element backing this Layer
  *     will be given this width.
- *                       
+ *
  * @param {!number} height
  *     The height of the Layer, in pixels. The canvas element backing this
  *     Layer will be given this height.
+ *
+ * @param {HTMLCanvasElement|OffscreenCanvas} [backingCanvas]
+ *     An existing canvas to use as the backing canvas for this Layer. If
+ *     omitted, a new canvas will be created using
+ *     {@link Guacamole.Layer.createBackingCanvas}, selecting an
+ *     HTMLCanvasElement or OffscreenCanvas based on the execution context.
+ *     Providing a pre-existing canvas is useful in Worker contexts where the
+ *     OffscreenCanvas has been transferred from the main thread via
+ *     HTMLCanvasElement.transferControlToOffscreen().
  */
-Guacamole.Layer = function(width, height) {
+Guacamole.Layer = function(width, height, backingCanvas) {
 
     /**
      * Reference to this Layer.
@@ -61,15 +76,15 @@ Guacamole.Layer = function(width, height) {
      * The canvas element backing this Layer.
      *
      * @private
-     * @type {!HTMLCanvasElement}
+     * @type {!(HTMLCanvasElement|OffscreenCanvas)}
      */
-    var canvas = document.createElement("canvas");
+    var canvas = backingCanvas || Guacamole.Layer.createBackingCanvas();
 
     /**
      * The 2D display context of the canvas element backing this Layer.
      *
      * @private
-     * @type {!CanvasRenderingContext2D}
+     * @type {!(CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D)}
      */
     var context = canvas.getContext("2d");
     context.save();
@@ -160,9 +175,10 @@ Guacamole.Layer = function(width, height) {
             if (!empty && canvas.width !== 0 && canvas.height !== 0) {
 
                 // Create canvas and context for holding old data
-                oldData = document.createElement("canvas");
-                oldData.width = Math.min(layer.width, newWidth);
-                oldData.height = Math.min(layer.height, newHeight);
+                oldData = Guacamole.Layer.createBackingCanvas(
+                    Math.min(layer.width, newWidth),
+                    Math.min(layer.height, newHeight)
+                );
 
                 var oldDataContext = oldData.getContext("2d");
 
@@ -291,7 +307,11 @@ Guacamole.Layer = function(width, height) {
      * of the canvas may not exactly match those of the Layer, as resizing a
      * canvas while maintaining its state is an expensive operation.
      *
-     * @returns {!HTMLCanvasElement}
+     * The returned canvas may be either an HTMLCanvasElement or an
+     * OffscreenCanvas, depending on the execution context of this Layer and
+     * whether a specific backing canvas was provided at construction time.
+     *
+     * @returns {!(HTMLCanvasElement|OffscreenCanvas)}
      *     The canvas element backing this Layer.
      */
     this.getCanvas = function getCanvas() {
@@ -303,16 +323,17 @@ Guacamole.Layer = function(width, height) {
      * Unlike getCanvas(), the canvas element returned is guaranteed to have
      * the exact same dimensions as the Layer.
      *
-     * @returns {!HTMLCanvasElement}
+     * The returned canvas may be either an HTMLCanvasElement or an
+     * OffscreenCanvas, depending on the execution context of this Layer.
+     *
+     * @returns {!(HTMLCanvasElement|OffscreenCanvas)}
      *     A new canvas element containing a copy of the image content this
      *     Layer.
      */
     this.toCanvas = function toCanvas() {
 
         // Create new canvas having same dimensions
-        var canvas = document.createElement('canvas');
-        canvas.width = layer.width;
-        canvas.height = layer.height;
+        var canvas = Guacamole.Layer.createBackingCanvas(layer.width, layer.height);
 
         // Copy image contents to new canvas if layer has nonzero dimensions
         var context = canvas.getContext('2d');
@@ -1001,8 +1022,53 @@ Guacamole.Layer = function(width, height) {
 
     // Explicitly render canvas below other elements in the layer (such as
     // child layers). Chrome and others may fail to render layers properly
-    // without this.
-    canvas.style.zIndex = -1;
+    // without this. Only HTMLCanvasElement has a "style" property; the
+    // OffscreenCanvas variant has no DOM stacking concept and may be used
+    // outside the main thread where this is not meaningful.
+    if (canvas.style)
+        canvas.style.zIndex = -1;
+
+};
+
+/**
+ * Creates and returns a new canvas suitable for use as the backing canvas of
+ * a Guacamole.Layer. When invoked within a context that has access to the DOM,
+ * such as the main browser thread, a new HTMLCanvasElement will be returned.
+ * Otherwise, such as within a Web Worker, a new OffscreenCanvas will be
+ * returned.
+ *
+ * @param {number} [width=0]
+ *     The width of the newly-created canvas, in pixels.
+ *
+ * @param {number} [height=0]
+ *     The height of the newly-created canvas, in pixels.
+ *
+ * @returns {!(HTMLCanvasElement|OffscreenCanvas)}
+ *     A newly-created canvas with the given dimensions.
+ *
+ * @throws {!Error}
+ *     If neither HTMLCanvasElement nor OffscreenCanvas are available in the
+ *     current execution context.
+ */
+Guacamole.Layer.createBackingCanvas = function createBackingCanvas(width, height) {
+
+    width = width || 0;
+    height = height || 0;
+
+    // Prefer DOM-backed canvas where the DOM is reachable, matching legacy
+    // Guacamole.Layer behavior for consumers that do not expect OffscreenCanvas
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        var canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas;
+    }
+
+    // Fall back to OffscreenCanvas in contexts without the DOM, e.g. Workers
+    if (typeof OffscreenCanvas !== 'undefined')
+        return new OffscreenCanvas(width, height);
+
+    throw new Error('No canvas implementation is available in this execution context.');
 
 };
 

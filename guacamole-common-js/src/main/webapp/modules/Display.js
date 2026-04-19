@@ -25,10 +25,17 @@ var Guacamole = Guacamole || {};
  * embody the set of operations present in the protocol. The order operations
  * are executed is guaranteed to be in the same order as their corresponding
  * functions are called.
- * 
+ *
  * @constructor
+ * @param {Guacamole.Display.Stage} [stage]
+ *     The {@link Guacamole.Display.Stage} through which this display should
+ *     perform all DOM-related work. If omitted, a new {@link
+ *     Guacamole.Display.DOMStage} is created, preserving the behavior of
+ *     previous versions of this class.
  */
-Guacamole.Display = function() {
+Guacamole.Display = function(stage) {
+
+    stage = stage || new Guacamole.Display.DOMStage();
 
     /**
      * Reference to this Guacamole.Display.
@@ -40,39 +47,20 @@ Guacamole.Display = function() {
     var displayHeight = 0;
     var displayScale = 1;
 
-    // Create display
-    var display = document.createElement("div");
-    display.style.position = "relative";
-    display.style.width = displayWidth + "px";
-    display.style.height = displayHeight + "px";
-
-    // Ensure transformations on display originate at 0,0
-    display.style.transformOrigin =
-    display.style.webkitTransformOrigin =
-    display.style.MozTransformOrigin =
-    display.style.OTransformOrigin =
-    display.style.msTransformOrigin =
-        "0 0";
+    // Initialize stage dimensions to match initial display state
+    stage.setDisplaySize(displayWidth, displayHeight);
+    stage.setBoundsSize(displayWidth * displayScale, displayHeight * displayScale);
 
     // Create default layer
-    var default_layer = new Guacamole.Display.VisibleLayer(displayWidth, displayHeight);
+    var default_layer = new Guacamole.Display.VisibleLayer(displayWidth, displayHeight, stage);
 
     // Create cursor layer
-    var cursor = new Guacamole.Display.VisibleLayer(0, 0);
+    var cursor = new Guacamole.Display.VisibleLayer(0, 0, stage);
     cursor.setChannelMask(Guacamole.Layer.SRC);
 
     // Add default layer and cursor to display
-    display.appendChild(default_layer.getElement());
-    display.appendChild(cursor.getElement());
-
-    // Create bounding div 
-    var bounds = document.createElement("div");
-    bounds.style.position = "relative";
-    bounds.style.width = (displayWidth*displayScale) + "px";
-    bounds.style.height = (displayHeight*displayScale) + "px";
-
-    // Add display to bounds
-    bounds.appendChild(display);
+    stage.attachTopLevelLayer(default_layer);
+    stage.attachTopLevelLayer(cursor);
 
     /**
      * The X coordinate of the hotspot of the mouse cursor. The hotspot is
@@ -522,12 +510,12 @@ Guacamole.Display = function() {
 
     /**
      * Returns the element which contains the Guacamole display.
-     * 
+     *
      * @return {!Element}
      *     The element containing the Guacamole display.
      */
     this.getElement = function() {
-        return bounds;
+        return stage.getRootElement();
     };
 
     /**
@@ -714,18 +702,13 @@ Guacamole.Display = function() {
      */
     this.showCursor = function(shown) {
 
-        var element = cursor.getElement();
-        var parent = element.parentNode;
-
         // Remove from DOM if hidden
-        if (shown === false) {
-            if (parent)
-                parent.removeChild(element);
-        }
+        if (shown === false)
+            stage.detachTopLevelLayer(cursor);
 
         // Otherwise, ensure cursor is child of display
-        else if (parent !== display)
-            display.appendChild(element);
+        else
+            stage.attachTopLevelLayer(cursor);
 
     };
 
@@ -777,12 +760,10 @@ Guacamole.Display = function() {
                 // Update (set) display size
                 displayWidth = width;
                 displayHeight = height;
-                display.style.width = displayWidth + "px";
-                display.style.height = displayHeight + "px";
+                stage.setDisplaySize(displayWidth, displayHeight);
 
                 // Update bounds size
-                bounds.style.width = (displayWidth*displayScale) + "px";
-                bounds.style.height = (displayHeight*displayScale) + "px";
+                stage.setBoundsSize(displayWidth * displayScale, displayHeight * displayScale);
 
                 // Notify of resize
                 if (guac_display.onresize)
@@ -834,52 +815,19 @@ Guacamole.Display = function() {
      */
     this.drawBlob = function(layer, x, y, blob) {
 
-        var task;
+        var image = null;
 
-        // Prefer createImageBitmap() over blob URLs if available
-        if (window.createImageBitmap) {
+        // Draw image once decoded
+        var task = scheduleTask(function drawDecodedBlob() {
+            if (image && image.width && image.height)
+                layer.drawImage(x, y, image);
+        }, true);
 
-            var bitmap;
-
-            // Draw image once loaded
-            task = scheduleTask(function drawImageBitmap() {
-                layer.drawImage(x, y, bitmap);
-            }, true);
-
-            // Load image from provided blob
-            window.createImageBitmap(blob).then(function bitmapLoaded(decoded) {
-                bitmap = decoded;
-                task.unblock();
-            });
-
-        }
-
-        // Use blob URLs and the Image object if createImageBitmap() is
-        // unavailable
-        else {
-
-            // Create URL for blob
-            var url = URL.createObjectURL(blob);
-
-            // Draw and free blob URL when ready
-            task = scheduleTask(function __display_drawBlob() {
-
-                // Draw the image only if it loaded without errors
-                if (image.width && image.height)
-                    layer.drawImage(x, y, image);
-
-                // Blob URL no longer needed
-                URL.revokeObjectURL(url);
-
-            }, true);
-
-            // Load image from URL
-            var image = new Image();
-            image.onload = task.unblock;
-            image.onerror = task.unblock;
-            image.src = url;
-
-        }
+        // Decode the blob asynchronously and unblock the task once complete
+        stage.decodeBlob(blob, blob && blob.type).then(function blobDecoded(decoded) {
+            image = decoded;
+            task.unblock();
+        });
 
     };
 
@@ -908,44 +856,22 @@ Guacamole.Display = function() {
      */
     this.drawStream = function drawStream(layer, x, y, stream, mimetype) {
 
-        // Leverage ImageDecoder to decode the image stream as it is received
-        // whenever possible, as this reduces latency that might otherwise be
-        // caused by waiting for the full image to be received
-        if (window.ImageDecoder && window.ReadableStream) {
+        var decodedFrame = null;
 
-            var imageDecoder = new ImageDecoder({
-                type: mimetype,
-                data: stream.toReadableStream()
-            });
-
-            var decodedFrame = null;
-
-            // Draw image once loaded
-            var task = scheduleTask(function drawImageBitmap() {
+        // Draw image once decoded
+        var task = scheduleTask(function drawDecodedStream() {
+            if (decodedFrame)
                 layer.drawImage(x, y, decodedFrame);
-            }, true);
+        }, true);
 
-            imageDecoder.decode({ completeFramesOnly: true }).then(function bitmapLoaded(result) {
-                decodedFrame = result.image;
-                task.unblock();
-            });
-
-        }
-
-        // NOTE: We do not use Blobs and createImageBitmap() here, as doing so
-        // is very latent compared to the old data URI method and the new
-        // ImageDecoder object. The new ImageDecoder object is currently
-        // supported by most browsers, with other browsers being much faster if
-        // data URIs are used. The iOS version of Safari is particularly laggy
-        // if Blobs and createImageBitmap() are used instead.
-
-        // Lacking ImageDecoder, fall back to data URIs and the Image object
-        else {
-            var reader = new Guacamole.DataURIReader(stream, mimetype);
-            reader.onend = function drawImageDataURI() {
-                guac_display.draw(layer, x, y, reader.getURI());
-            };
-        }
+        // Decode the incoming stream asynchronously and unblock the task
+        // once the image is available. Decoding begins as stream data is
+        // received, reducing latency that would otherwise be incurred by
+        // waiting for the full image to arrive.
+        stage.decodeStream(stream, mimetype).then(function streamDecoded(decoded) {
+            decodedFrame = decoded;
+            task.unblock();
+        });
 
     };
 
@@ -968,18 +894,20 @@ Guacamole.Display = function() {
      */
     this.draw = function(layer, x, y, url) {
 
+        var image = null;
+
         var task = scheduleTask(function __display_draw() {
 
             // Draw the image only if it loaded without errors
-            if (image.width && image.height)
+            if (image && image.width && image.height)
                 layer.drawImage(x, y, image);
 
         }, true);
 
-        var image = new Image();
-        image.onload = task.unblock;
-        image.onerror = task.unblock;
-        image.src = url;
+        stage.decodeUrl(url).then(function urlDecoded(decoded) {
+            image = decoded;
+            task.unblock();
+        });
 
     };
 
@@ -1002,27 +930,7 @@ Guacamole.Display = function() {
      *     The URL of the video to play.
      */
     this.play = function(layer, mimetype, duration, url) {
-
-        // Start loading the video
-        var video = document.createElement("video");
-        video.type = mimetype;
-        video.src = url;
-
-        // Start copying frames when playing
-        video.addEventListener("play", function() {
-            
-            function render_callback() {
-                layer.drawImage(0, 0, video);
-                if (!video.ended)
-                    window.setTimeout(render_callback, 20);
-            }
-            
-            render_callback();
-            
-        }, false);
-
-        scheduleTask(video.play);
-
+        scheduleTask(stage.playVideo(layer, mimetype, duration, url));
     };
 
     /**
@@ -1640,19 +1548,12 @@ Guacamole.Display = function() {
      */
     this.scale = function(scale) {
 
-        display.style.transform =
-        display.style.WebkitTransform =
-        display.style.MozTransform =
-        display.style.OTransform =
-        display.style.msTransform =
-
-            "scale(" + scale + "," + scale + ")";
+        stage.setScale(scale);
 
         displayScale = scale;
 
         // Update bounds size
-        bounds.style.width = (displayWidth*displayScale) + "px";
-        bounds.style.height = (displayHeight*displayScale) + "px";
+        stage.setBoundsSize(displayWidth * displayScale, displayHeight * displayScale);
 
     };
 
@@ -1670,15 +1571,17 @@ Guacamole.Display = function() {
      * Returns a canvas element containing the entire display, with all child
      * layers composited within.
      *
-     * @return {!HTMLCanvasElement}
+     * When the stage is DOM-backed (the default), the returned canvas is an
+     * HTMLCanvasElement. When the stage is backed by an OffscreenCanvas (e.g.
+     * within a Web Worker), the returned canvas is an OffscreenCanvas.
+     *
+     * @return {!(HTMLCanvasElement|OffscreenCanvas)}
      *     A new canvas element containing a copy of the display.
      */
     this.flatten = function() {
-       
+
         // Get destination canvas
-        var canvas = document.createElement("canvas");
-        canvas.width = default_layer.width;
-        canvas.height = default_layer.height;
+        var canvas = Guacamole.Layer.createBackingCanvas(default_layer.width, default_layer.height);
 
         var context = canvas.getContext("2d");
 
@@ -1756,8 +1659,14 @@ Guacamole.Display = function() {
 /**
  * Simple container for Guacamole.Layer, allowing layers to be easily
  * repositioned and nested. This allows certain operations to be accelerated
- * through DOM manipulation, rather than raster operations.
- * 
+ * through compositor manipulation (typically the DOM), rather than raster
+ * operations.
+ *
+ * The concrete compositor used is determined by the {@link
+ * Guacamole.Display.Stage} provided at construction time. By default, a
+ * {@link Guacamole.Display.DOMStage} is used, which wraps the layer's
+ * canvas in a {@code <div>} and performs all compositor operations via CSS.
+ *
  * @constructor
  * @augments Guacamole.Layer
  * @param {!number} width
@@ -1767,8 +1676,17 @@ Guacamole.Display = function() {
  * @param {!number} height
  *     The height of the Layer, in pixels. The canvas element backing this
  *     Layer will be given this height.
+ *
+ * @param {Guacamole.Display.Stage} [stage]
+ *     The {@link Guacamole.Display.Stage} that will own this layer's
+ *     compositor container. If omitted, a lazily-created default {@link
+ *     Guacamole.Display.DOMStage} is used, preserving the behavior of
+ *     previous versions of this class for external consumers that construct
+ *     VisibleLayer directly.
  */
-Guacamole.Display.VisibleLayer = function(width, height) {
+Guacamole.Display.VisibleLayer = function(width, height, stage) {
+
+    stage = stage || Guacamole.Display.VisibleLayer.__defaultStage();
 
     Guacamole.Layer.apply(this, [width, height]);
 
@@ -1784,7 +1702,7 @@ Guacamole.Display.VisibleLayer = function(width, height) {
      * Identifier which uniquely identifies this layer. This is COMPLETELY
      * UNRELATED to the index of the underlying layer, which is specific
      * to the Guacamole protocol, and not relevant at this level.
-     * 
+     *
      * @private
      * @type {!number}
      */
@@ -1826,7 +1744,7 @@ Guacamole.Display.VisibleLayer = function(width, height) {
      * corresponds to a value from the transformation matrix, with the first
      * three values being the first row, and the last three values being the
      * second row. There are six values total.
-     * 
+     *
      * @type {!number[]}
      */
     this.matrix = [1, 0, 0, 1, 0, 0];
@@ -1845,21 +1763,16 @@ Guacamole.Display.VisibleLayer = function(width, height) {
      */
     this.children = {};
 
-    // Set layer position
-    var canvas = layer.getCanvas();
-    canvas.style.position = "absolute";
-    canvas.style.left = "0px";
-    canvas.style.top = "0px";
-
-    // Create div with given size
-    var div = document.createElement("div");
-    div.appendChild(canvas);
-    div.style.width = width + "px";
-    div.style.height = height + "px";
-    div.style.position = "absolute";
-    div.style.left = "0px";
-    div.style.top = "0px";
-    div.style.overflow = "hidden";
+    /**
+     * Compositor container for this layer, obtained from the stage at
+     * construction time. All DOM-level compositor operations (reparenting,
+     * CSS transforms, opacity, z-index, dimension updates) are delegated to
+     * this container.
+     *
+     * @private
+     * @type {!Guacamole.Display.Stage.LayerContainer}
+     */
+    var container = stage.createLayerContainer(layer.getCanvas(), width, height);
 
     /**
      * Superclass resize() function.
@@ -1869,45 +1782,44 @@ Guacamole.Display.VisibleLayer = function(width, height) {
 
     this.resize = function(width, height) {
 
-        // Resize containing div
-        div.style.width = width + "px";
-        div.style.height = height + "px";
+        // Resize containing compositor
+        container.resize(width, height);
 
         __super_resize(width, height);
 
     };
-  
+
     /**
      * Returns the element containing the canvas and any other elements
      * associated with this layer.
+     *
+     * When this layer's compositor is DOM-backed (the default), the returned
+     * element is an HTML {@code <div>}. Alternative stages may return
+     * different element types or opaque handles.
      *
      * @returns {!Element}
      *     The element containing this layer's canvas.
      */
     this.getElement = function() {
-        return div;
+        return container.getElement();
     };
 
     /**
-     * The translation component of this layer's transform.
+     * Returns the compositor container backing this layer. This is primarily
+     * used internally when a VisibleLayer is reparented to another
+     * VisibleLayer.
      *
      * @private
-     * @type {!string}
+     * @returns {!Guacamole.Display.Stage.LayerContainer}
      */
-    var translate = "translate(0px, 0px)"; // (0, 0)
-
-    /**
-     * The arbitrary matrix component of this layer's transform.
-     *
-     * @private
-     * @type {!string}
-     */
-    var matrix = "matrix(1, 0, 0, 1, 0, 0)"; // Identity
+    this.__getContainer = function() {
+        return container;
+    };
 
     /**
      * Moves the upper-left corner of this layer to the given X and Y
      * coordinate.
-     * 
+     *
      * @param {!number} x
      *     The X coordinate to move to.
      *
@@ -1915,31 +1827,16 @@ Guacamole.Display.VisibleLayer = function(width, height) {
      *     The Y coordinate to move to.
      */
     this.translate = function(x, y) {
-
         layer.x = x;
         layer.y = y;
-
-        // Generate translation
-        translate = "translate("
-                        + x + "px,"
-                        + y + "px)";
-
-        // Set layer transform 
-        div.style.transform =
-        div.style.WebkitTransform =
-        div.style.MozTransform =
-        div.style.OTransform =
-        div.style.msTransform =
-
-            translate + " " + matrix;
-
+        container.translate(x, y);
     };
 
     /**
      * Moves the upper-left corner of this VisibleLayer to the given X and Y
      * coordinate, sets the Z stacking order, and reparents this VisibleLayer
      * to the given VisibleLayer.
-     * 
+     *
      * @param {!Guacamole.Display.VisibleLayer} parent
      *     The parent to set.
      *
@@ -1963,29 +1860,28 @@ Guacamole.Display.VisibleLayer = function(width, height) {
             layer.parent = parent;
             parent.children[layer.__unique_id] = layer;
 
-            // Reparent element
-            var parent_element = parent.getElement();
-            parent_element.appendChild(div);
+            // Reparent compositor container
+            container.attachTo(parent.__getContainer());
 
         }
 
         // Set location
         layer.translate(x, y);
         layer.z = z;
-        div.style.zIndex = z;
+        container.setZ(z);
 
     };
 
     /**
      * Sets the opacity of this layer to the given value, where 255 is fully
      * opaque and 0 is fully transparent.
-     * 
+     *
      * @param {!number} a
      *     The opacity to set.
      */
     this.shade = function(a) {
         layer.alpha = a;
-        div.style.opacity = a/255.0;
+        container.shade(a);
     };
 
     /**
@@ -2000,10 +1896,9 @@ Guacamole.Display.VisibleLayer = function(width, height) {
             layer.parent = null;
         }
 
-        // Remove from parent element
-        if (div.parentNode)
-            div.parentNode.removeChild(div);
-        
+        // Remove from compositor
+        container.dispose();
+
     };
 
     /**
@@ -2029,29 +1924,8 @@ Guacamole.Display.VisibleLayer = function(width, height) {
      *     The sixth value in the affine transform's matrix.
      */
     this.distort = function(a, b, c, d, e, f) {
-
-        // Store matrix
         layer.matrix = [a, b, c, d, e, f];
-
-        // Generate matrix transformation
-        matrix =
-
-            /* a c e
-             * b d f
-             * 0 0 1
-             */
-    
-            "matrix(" + a + "," + b + "," + c + "," + d + "," + e + "," + f + ")";
-
-        // Set layer transform 
-        div.style.transform =
-        div.style.WebkitTransform =
-        div.style.MozTransform =
-        div.style.OTransform =
-        div.style.msTransform =
-
-            translate + " " + matrix;
-
+        container.distort(a, b, c, d, e, f);
     };
 
 };
@@ -2065,6 +1939,532 @@ Guacamole.Display.VisibleLayer = function(width, height) {
  * @type {!number}
  */
 Guacamole.Display.VisibleLayer.__next_id = 0;
+
+/**
+ * Returns the lazily-initialized singleton {@link Guacamole.Display.DOMStage}
+ * used by {@link Guacamole.Display.VisibleLayer} when constructed without an
+ * explicit stage. This default exists solely to preserve backward
+ * compatibility for external callers that construct VisibleLayer directly.
+ * Consumers that construct a {@link Guacamole.Display} receive a dedicated
+ * stage instance and do not use this singleton.
+ *
+ * @private
+ * @returns {!Guacamole.Display.DOMStage}
+ */
+Guacamole.Display.VisibleLayer.__defaultStage = function __defaultStage() {
+    if (!Guacamole.Display.VisibleLayer.__sharedDefaultStage)
+        Guacamole.Display.VisibleLayer.__sharedDefaultStage = new Guacamole.Display.DOMStage();
+    return Guacamole.Display.VisibleLayer.__sharedDefaultStage;
+};
+
+/**
+ * Abstraction through which a {@link Guacamole.Display} performs all DOM-
+ * related work. A Stage owns the display's root element and is responsible
+ * for:
+ *
+ * - Creating the root container that will hold all visible layers.
+ * - Adjusting the display's dimensions and scale.
+ * - Creating and managing a per-layer compositor container (the element that
+ *   holds the layer's canvas and applies CSS position/transform/opacity/
+ *   z-index).
+ * - Decoding images into something Guacamole.Layer.drawImage() can accept.
+ * - Playing videos within a layer.
+ *
+ * Routing all DOM interaction through this interface keeps {@link
+ * Guacamole.Display} and {@link Guacamole.Display.VisibleLayer} free of
+ * direct DOM references, allowing the same rendering code to run within a
+ * Web Worker backed by OffscreenCanvas (see a future WorkerStage).
+ *
+ * This class defines the expected interface. Concrete implementations include
+ * {@link Guacamole.Display.DOMStage} (used by default when a DOM is
+ * available).
+ *
+ * @constructor
+ * @abstract
+ */
+Guacamole.Display.Stage = function Stage() {};
+
+/**
+ * A container that holds the canvas of a single {@link
+ * Guacamole.Display.VisibleLayer} and provides the compositor operations
+ * (position, size, nesting, z-index, transform, opacity, removal) that
+ * VisibleLayer needs to delegate.
+ *
+ * Obtained via {@link Guacamole.Display.Stage#createLayerContainer}.
+ *
+ * @constructor
+ * @abstract
+ */
+Guacamole.Display.Stage.LayerContainer = function LayerContainer() {};
+
+/**
+ * The default {@link Guacamole.Display.Stage} implementation, which manages
+ * the display using ordinary DOM elements. A root {@code <div>} is wrapped in
+ * a bounding {@code <div>} so that scaling can be applied to the inner
+ * element without affecting the space consumed by the outer element. Each
+ * {@link Guacamole.Display.VisibleLayer} receives its own wrapping {@code
+ * <div>} around its canvas so that nested layers may be repositioned and
+ * transformed through CSS rather than raster compositing.
+ *
+ * Instances of this class are created automatically by {@link
+ * Guacamole.Display} when no stage is provided at construction time.
+ *
+ * @constructor
+ * @augments Guacamole.Display.Stage
+ */
+Guacamole.Display.DOMStage = function DOMStage() {
+
+    var stage = this;
+
+    // Create display
+    var display = document.createElement("div");
+    display.style.position = "relative";
+    display.style.width = "0px";
+    display.style.height = "0px";
+
+    // Ensure transformations on display originate at 0,0
+    display.style.transformOrigin =
+    display.style.webkitTransformOrigin =
+    display.style.MozTransformOrigin =
+    display.style.OTransformOrigin =
+    display.style.msTransformOrigin =
+        "0 0";
+
+    // Create bounding div
+    var bounds = document.createElement("div");
+    bounds.style.position = "relative";
+    bounds.style.width = "0px";
+    bounds.style.height = "0px";
+
+    // Add display to bounds
+    bounds.appendChild(display);
+
+    /**
+     * Returns the outermost element of the display, suitable for insertion
+     * into the DOM by consumers.
+     *
+     * @returns {!Element}
+     */
+    this.getRootElement = function getRootElement() {
+        return bounds;
+    };
+
+    /**
+     * Sets the logical size of the display. This represents the resolution of
+     * the remote desktop as rendered by Guacamole, independent of any scaling
+     * applied for display purposes.
+     *
+     * @param {!number} width
+     *     The logical width of the display, in pixels.
+     *
+     * @param {!number} height
+     *     The logical height of the display, in pixels.
+     */
+    this.setDisplaySize = function setDisplaySize(width, height) {
+        display.style.width = width + "px";
+        display.style.height = height + "px";
+    };
+
+    /**
+     * Sets the outer size of the display (the size actually occupied on the
+     * page). This typically differs from the logical size when the display is
+     * scaled.
+     *
+     * @param {!number} width
+     *     The scaled width of the display, in pixels.
+     *
+     * @param {!number} height
+     *     The scaled height of the display, in pixels.
+     */
+    this.setBoundsSize = function setBoundsSize(width, height) {
+        bounds.style.width = width + "px";
+        bounds.style.height = height + "px";
+    };
+
+    /**
+     * Sets the scale at which the display is rendered relative to its logical
+     * size.
+     *
+     * @param {!number} scale
+     *     The scale to apply, where 1.0 is 1:1 scale.
+     */
+    this.setScale = function setScale(scale) {
+        display.style.transform =
+        display.style.WebkitTransform =
+        display.style.MozTransform =
+        display.style.OTransform =
+        display.style.msTransform =
+            "scale(" + scale + "," + scale + ")";
+    };
+
+    /**
+     * Attaches the given VisibleLayer's container such that it is a direct
+     * child of the display. This is used for layers that exist at the
+     * top-level of the display (typically the default layer and the cursor
+     * layer). This operation is idempotent: if the layer's container is
+     * already a direct child of the display, the display tree is left
+     * unchanged (preserving sibling ordering).
+     *
+     * @param {!Guacamole.Display.VisibleLayer} layer
+     *     The layer whose container should be attached.
+     */
+    this.attachTopLevelLayer = function attachTopLevelLayer(layer) {
+        var element = layer.getElement();
+        if (element.parentNode !== display)
+            display.appendChild(element);
+    };
+
+    /**
+     * Detaches the given VisibleLayer's container from its current parent,
+     * if it is currently attached. Has no effect if the layer is not
+     * currently attached anywhere.
+     *
+     * @param {!Guacamole.Display.VisibleLayer} layer
+     *     The layer whose container should be detached.
+     */
+    this.detachTopLevelLayer = function detachTopLevelLayer(layer) {
+        var element = layer.getElement();
+        if (element.parentNode)
+            element.parentNode.removeChild(element);
+    };
+
+    /**
+     * Creates a new compositor container for a VisibleLayer's backing canvas.
+     *
+     * @param {!(HTMLCanvasElement|OffscreenCanvas)} canvas
+     *     The canvas to be wrapped by this container.
+     *
+     * @param {!number} width
+     *     The initial width of the container, in pixels.
+     *
+     * @param {!number} height
+     *     The initial height of the container, in pixels.
+     *
+     * @returns {!Guacamole.Display.Stage.LayerContainer}
+     *     A new compositor container wrapping the given canvas.
+     */
+    this.createLayerContainer = function createLayerContainer(canvas, width, height) {
+        return new Guacamole.Display.DOMStage.LayerContainer(canvas, width, height);
+    };
+
+    /**
+     * Decodes the image at the given URL, producing a value suitable for use
+     * with {@link Guacamole.Layer#drawImage}.
+     *
+     * @param {!string} url
+     *     The URL of the image to decode. Typically a data: URL.
+     *
+     * @returns {!Promise.<CanvasImageSource>}
+     *     A promise that resolves to the decoded image. The promise resolves
+     *     (rather than rejects) even when the image fails to load, matching
+     *     the behavior of the original Guacamole.Display.draw().
+     */
+    this.decodeUrl = function decodeUrl(url) {
+        return new Promise(function decodeImageUrl(resolve) {
+            var image = new Image();
+            image.onload = function imageLoaded() { resolve(image); };
+            image.onerror = function imageFailed() { resolve(image); };
+            image.src = url;
+        });
+    };
+
+    /**
+     * Decodes the image contained within the given Blob, producing a value
+     * suitable for use with {@link Guacamole.Layer#drawImage}.
+     *
+     * @param {!Blob} blob
+     *     The Blob containing the image to decode.
+     *
+     * @param {!string} mimetype
+     *     The mimetype of the image.
+     *
+     * @returns {!Promise.<CanvasImageSource>}
+     *     A promise that resolves to the decoded image.
+     */
+    this.decodeBlob = function decodeBlob(blob, mimetype) {
+
+        // Prefer createImageBitmap() over blob URLs if available
+        if (typeof window !== 'undefined' && window.createImageBitmap)
+            return window.createImageBitmap(blob);
+
+        // Use blob URLs and the Image object if createImageBitmap() is
+        // unavailable
+        return new Promise(function decodeBlobUrl(resolve) {
+
+            var url = URL.createObjectURL(blob);
+            var image = new Image();
+
+            image.onload = function imageLoaded() {
+                URL.revokeObjectURL(url);
+                resolve(image);
+            };
+
+            image.onerror = function imageFailed() {
+                URL.revokeObjectURL(url);
+                resolve(image);
+            };
+
+            image.src = url;
+
+        });
+
+    };
+
+    /**
+     * Decodes the image arriving through the given Guacamole.InputStream,
+     * producing a value suitable for use with {@link
+     * Guacamole.Layer#drawImage}. When ImageDecoder is available, decoding
+     * proceeds as data is received; otherwise the stream is collected into a
+     * data URI and decoded by the browser at the end of reception.
+     *
+     * @param {!Guacamole.InputStream} stream
+     *     The stream along which image data will be received.
+     *
+     * @param {!string} mimetype
+     *     The mimetype of the image within the stream.
+     *
+     * @returns {!Promise.<CanvasImageSource>}
+     *     A promise that resolves to the decoded image.
+     */
+    this.decodeStream = function decodeStream(stream, mimetype) {
+
+        // Leverage ImageDecoder to decode the image stream as it is received
+        // whenever possible, as this reduces latency that might otherwise be
+        // caused by waiting for the full image to be received
+        if (typeof window !== 'undefined' && window.ImageDecoder && window.ReadableStream) {
+
+            var imageDecoder = new ImageDecoder({
+                type: mimetype,
+                data: stream.toReadableStream()
+            });
+
+            return imageDecoder.decode({ completeFramesOnly: true })
+                    .then(function bitmapLoaded(result) { return result.image; });
+
+        }
+
+        // NOTE: We do not use Blobs and createImageBitmap() here, as doing so
+        // is very latent compared to the old data URI method and the new
+        // ImageDecoder object. The new ImageDecoder object is currently
+        // supported by most browsers, with other browsers being much faster if
+        // data URIs are used. The iOS version of Safari is particularly laggy
+        // if Blobs and createImageBitmap() are used instead.
+
+        // Lacking ImageDecoder, fall back to data URIs and the Image object
+        return new Promise(function decodeStreamViaDataURI(resolve) {
+            var reader = new Guacamole.DataURIReader(stream, mimetype);
+            reader.onend = function drawImageDataURI() {
+                stage.decodeUrl(reader.getURI()).then(resolve);
+            };
+        });
+
+    };
+
+    /**
+     * Plays the given video within the given layer. The caller is expected
+     * to treat the returned function as the handler of a scheduled display
+     * task, and to resize the target layer appropriately before invoking it.
+     *
+     * @param {!Guacamole.Layer} layer
+     *     The layer within which the video will be played.
+     *
+     * @param {!string} mimetype
+     *     The mimetype of the video.
+     *
+     * @param {!number} duration
+     *     The duration of the video, in milliseconds.
+     *
+     * @param {!string} url
+     *     The URL of the video to play.
+     *
+     * @returns {!function}
+     *     A function which, when called, begins playback of the video.
+     */
+    this.playVideo = function playVideo(layer, mimetype, duration, url) {
+
+        // Start loading the video
+        var video = document.createElement("video");
+        video.type = mimetype;
+        video.src = url;
+
+        // Start copying frames when playing
+        video.addEventListener("play", function videoStarted() {
+
+            function render_callback() {
+                layer.drawImage(0, 0, video);
+                if (!video.ended)
+                    window.setTimeout(render_callback, 20);
+            }
+
+            render_callback();
+
+        }, false);
+
+        return video.play.bind(video);
+
+    };
+
+};
+
+/**
+ * The DOM-backed implementation of {@link
+ * Guacamole.Display.Stage.LayerContainer}. Each container wraps a canvas in a
+ * {@code <div>} and applies CSS position, transform, opacity, and z-index
+ * accordingly.
+ *
+ * @constructor
+ * @augments Guacamole.Display.Stage.LayerContainer
+ * @param {!(HTMLCanvasElement|OffscreenCanvas)} canvas
+ *     The canvas to wrap. Only HTMLCanvasElement is meaningful for DOM
+ *     positioning; OffscreenCanvas is supported only for API symmetry and
+ *     will not be DOM-attached.
+ *
+ * @param {!number} width
+ *     The initial width of the container, in pixels.
+ *
+ * @param {!number} height
+ *     The initial height of the container, in pixels.
+ */
+Guacamole.Display.DOMStage.LayerContainer = function LayerContainer(canvas, width, height) {
+
+    // Position the canvas within the container. Only applicable to
+    // HTMLCanvasElement instances; the check guards against OffscreenCanvas
+    // callers that should not be hitting this code path in practice.
+    if (canvas.style) {
+        canvas.style.position = "absolute";
+        canvas.style.left = "0px";
+        canvas.style.top = "0px";
+    }
+
+    // Create div with given size
+    var div = document.createElement("div");
+    div.appendChild(canvas);
+    div.style.width = width + "px";
+    div.style.height = height + "px";
+    div.style.position = "absolute";
+    div.style.left = "0px";
+    div.style.top = "0px";
+    div.style.overflow = "hidden";
+
+    /**
+     * Current CSS translate() string for this container.
+     *
+     * @private
+     * @type {!string}
+     */
+    var translate = "translate(0px, 0px)";
+
+    /**
+     * Current CSS matrix() string for this container.
+     *
+     * @private
+     * @type {!string}
+     */
+    var matrix = "matrix(1, 0, 0, 1, 0, 0)";
+
+    /**
+     * Returns the underlying DOM element that wraps this container's canvas.
+     *
+     * @returns {!Element}
+     */
+    this.getElement = function getElement() {
+        return div;
+    };
+
+    /**
+     * Resizes the container to the given dimensions.
+     *
+     * @param {!number} width
+     *     The new width, in pixels.
+     *
+     * @param {!number} height
+     *     The new height, in pixels.
+     */
+    this.resize = function resize(width, height) {
+        div.style.width = width + "px";
+        div.style.height = height + "px";
+    };
+
+    /**
+     * Repositions the container, affecting only the translation component of
+     * the combined CSS transform.
+     *
+     * @param {!number} x
+     *     The X coordinate to move to.
+     *
+     * @param {!number} y
+     *     The Y coordinate to move to.
+     */
+    this.translate = function translateContainer(x, y) {
+        translate = "translate(" + x + "px," + y + "px)";
+        div.style.transform =
+        div.style.WebkitTransform =
+        div.style.MozTransform =
+        div.style.OTransform =
+        div.style.msTransform =
+            translate + " " + matrix;
+    };
+
+    /**
+     * Applies the given affine transform matrix to the container, affecting
+     * only the matrix component of the combined CSS transform.
+     *
+     * @param {!number} a
+     * @param {!number} b
+     * @param {!number} c
+     * @param {!number} d
+     * @param {!number} e
+     * @param {!number} f
+     */
+    this.distort = function distortContainer(a, b, c, d, e, f) {
+        matrix = "matrix(" + a + "," + b + "," + c + "," + d + "," + e + "," + f + ")";
+        div.style.transform =
+        div.style.WebkitTransform =
+        div.style.MozTransform =
+        div.style.OTransform =
+        div.style.msTransform =
+            translate + " " + matrix;
+    };
+
+    /**
+     * Attaches this container as a child of the given parent container,
+     * detaching from any previous parent as a side-effect.
+     *
+     * @param {!Guacamole.Display.Stage.LayerContainer} parent
+     *     The parent container.
+     */
+    this.attachTo = function attachTo(parent) {
+        parent.getElement().appendChild(div);
+    };
+
+    /**
+     * Sets the Z stacking order of this container relative to its siblings.
+     *
+     * @param {!number} z
+     */
+    this.setZ = function setZ(z) {
+        div.style.zIndex = z;
+    };
+
+    /**
+     * Sets the opacity of this container.
+     *
+     * @param {!number} alpha
+     *     The opacity, from 0 (fully transparent) to 255 (fully opaque).
+     */
+    this.shade = function shadeContainer(alpha) {
+        div.style.opacity = alpha / 255.0;
+    };
+
+    /**
+     * Removes this container from the DOM, if attached.
+     */
+    this.dispose = function disposeContainer() {
+        if (div.parentNode)
+            div.parentNode.removeChild(div);
+    };
+
+};
 
 /**
  * A set of Guacamole display performance statistics, describing the speed at
