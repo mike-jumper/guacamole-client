@@ -368,20 +368,20 @@ Guacamole.HTTPTunnel = function(tunnelURL, crossDomain, extraTunnelHeaders) {
     var resetTimers = function resetTimers() {
 
         // Get rid of old timeouts (if any)
-        window.clearTimeout(receive_timeout);
-        window.clearTimeout(unstableTimeout);
+        clearTimeout(receive_timeout);
+        clearTimeout(unstableTimeout);
 
         // Clear unstable status
         if (tunnel.state === Guacamole.Tunnel.State.UNSTABLE)
             tunnel.setState(Guacamole.Tunnel.State.OPEN);
 
         // Set new timeout for tracking overall connection timeout
-        receive_timeout = window.setTimeout(function () {
+        receive_timeout = setTimeout(function () {
             close_tunnel(new Guacamole.Status(Guacamole.Status.Code.UPSTREAM_TIMEOUT, "Server timeout."));
         }, tunnel.receiveTimeout);
 
         // Set new timeout for tracking suspected connection instability
-        unstableTimeout = window.setTimeout(function() {
+        unstableTimeout = setTimeout(function() {
             tunnel.setState(Guacamole.Tunnel.State.UNSTABLE);
         }, tunnel.unstableThreshold);
 
@@ -399,11 +399,11 @@ Guacamole.HTTPTunnel = function(tunnelURL, crossDomain, extraTunnelHeaders) {
     function close_tunnel(status) {
 
         // Get rid of old timeouts (if any)
-        window.clearTimeout(receive_timeout);
-        window.clearTimeout(unstableTimeout);
+        clearTimeout(receive_timeout);
+        clearTimeout(unstableTimeout);
 
         // Cease connection test pings
-        window.clearInterval(pingInterval);
+        clearInterval(pingInterval);
 
         // Ignore if already closed
         if (tunnel.state === Guacamole.Tunnel.State.CLOSED)
@@ -884,21 +884,21 @@ Guacamole.WebSocketTunnel = function(tunnelURL) {
     var resetTimers = function resetTimers() {
 
         // Get rid of old timeouts (if any)
-        window.clearTimeout(receive_timeout);
-        window.clearTimeout(unstableTimeout);
-        window.clearTimeout(pingTimeout);
+        clearTimeout(receive_timeout);
+        clearTimeout(unstableTimeout);
+        clearTimeout(pingTimeout);
 
         // Clear unstable status
         if (tunnel.state === Guacamole.Tunnel.State.UNSTABLE)
             tunnel.setState(Guacamole.Tunnel.State.OPEN);
 
         // Set new timeout for tracking overall connection timeout
-        receive_timeout = window.setTimeout(function () {
+        receive_timeout = setTimeout(function () {
             close_tunnel(new Guacamole.Status(Guacamole.Status.Code.UPSTREAM_TIMEOUT, "Server timeout."));
         }, tunnel.receiveTimeout);
 
         // Set new timeout for tracking suspected connection instability
-        unstableTimeout = window.setTimeout(function() {
+        unstableTimeout = setTimeout(function() {
             tunnel.setState(Guacamole.Tunnel.State.UNSTABLE);
         }, tunnel.unstableThreshold);
 
@@ -908,7 +908,7 @@ Guacamole.WebSocketTunnel = function(tunnelURL) {
         // Ping tunnel endpoint regularly to test connection stability, sending
         // the ping immediately if enough time has already elapsed
         if (pingDelay > 0)
-            pingTimeout = window.setTimeout(sendPing, pingDelay);
+            pingTimeout = setTimeout(sendPing, pingDelay);
         else
             sendPing();
 
@@ -926,9 +926,9 @@ Guacamole.WebSocketTunnel = function(tunnelURL) {
     function close_tunnel(status) {
 
         // Get rid of old timeouts (if any)
-        window.clearTimeout(receive_timeout);
-        window.clearTimeout(unstableTimeout);
-        window.clearTimeout(pingTimeout);
+        clearTimeout(receive_timeout);
+        clearTimeout(unstableTimeout);
+        clearTimeout(pingTimeout);
 
         // Ignore if already closed
         if (tunnel.state === Guacamole.Tunnel.State.CLOSED)

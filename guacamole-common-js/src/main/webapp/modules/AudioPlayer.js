@@ -189,7 +189,7 @@ Guacamole.RawAudioPlayer = function RawAudioPlayer(stream, mimetype) {
      * @private
      * @constructor
      */
-    var SampleArray = (format.bytesPerSample === 1) ? window.Int8Array : window.Int16Array;
+    var SampleArray = (format.bytesPerSample === 1) ? Int8Array : Int16Array;
 
     /**
      * The maximum absolute value of any sample within a raw audio packet

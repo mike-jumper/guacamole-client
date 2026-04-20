@@ -23,12 +23,21 @@ var Guacamole = Guacamole || {};
  * Guacamole protocol client. Given a {@link Guacamole.Tunnel},
  * automatically handles incoming and outgoing Guacamole instructions via the
  * provided tunnel, updating its display using one or more canvas elements.
- * 
+ *
  * @constructor
  * @param {!Guacamole.Tunnel} tunnel
  *     The tunnel to use to send and receive Guacamole instructions.
+ *
+ * @param {Guacamole.Display} [display]
+ *     The {@link Guacamole.Display} against which the client should render
+ *     its visible and buffer layers. If omitted, a new DOM-backed
+ *     Guacamole.Display is constructed automatically, matching the
+ *     behavior of previous versions. Supplying a display is useful when
+ *     the client is to operate within a Web Worker (using a Display backed
+ *     by a {@link Guacamole.Display.WorkerStage}) or when integrating the
+ *     client with an alternative compositor.
  */
-Guacamole.Client = function(tunnel) {
+Guacamole.Client = function(tunnel, display) {
 
     var guac_client = this;
 
@@ -96,7 +105,7 @@ Guacamole.Client = function(tunnel) {
      * @private
      * @type {!Guacamole.Display}
      */
-    var display = new Guacamole.Display();
+    display = display || new Guacamole.Display();
 
     /**
      * All available layers and buffers
@@ -1807,7 +1816,7 @@ Guacamole.Client = function(tunnel) {
      */
     var scheduleKeepAlive = function scheduleKeepAlive() {
 
-        window.clearTimeout(keepAliveTimeout);
+        clearTimeout(keepAliveTimeout);
 
         var currentTime = new Date().getTime();
         var keepAliveDelay = Math.max(lastSentKeepAlive + KEEP_ALIVE_FREQUENCY - currentTime, 0);
@@ -1816,7 +1825,7 @@ Guacamole.Client = function(tunnel) {
         // immediately if enough time has elapsed that it should have already
         // been sent
         if (keepAliveDelay > 0)
-            keepAliveTimeout = window.setTimeout(sendKeepAlive, keepAliveDelay);
+            keepAliveTimeout = setTimeout(sendKeepAlive, keepAliveDelay);
         else
             sendKeepAlive();
 
@@ -1829,7 +1838,7 @@ Guacamole.Client = function(tunnel) {
      * @private
      */
     var stopKeepAlive = function stopKeepAlive() {
-        window.clearTimeout(keepAliveTimeout);
+        clearTimeout(keepAliveTimeout);
     };
 
     tunnel.oninstruction = function(opcode, parameters) {

@@ -51,6 +51,12 @@ Guacamole.AudioContextFactory = {
      */
     'getAudioContext' : function getAudioContext() {
 
+        // The Web Audio API is only available on the main thread. In
+        // execution contexts without a window (such as Web Workers), no
+        // AudioContext can be obtained.
+        if (typeof window === 'undefined')
+            return null;
+
         // Fallback to Webkit-specific AudioContext implementation
         var AudioContext = window.AudioContext || window.webkitAudioContext;
 

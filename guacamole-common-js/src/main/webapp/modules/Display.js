@@ -209,8 +209,18 @@ Guacamole.Display = function(stage) {
         // Remove rendered frames from array
         frames.splice(0, rendered_frames);
 
-        if (rendered_frames)
+        if (rendered_frames) {
+
+            // Notify the stage that a frame boundary has passed. This allows
+            // worker-backed stages to capture and transfer the contents of
+            // visible layers to the main thread; DOM-backed stages typically
+            // do nothing here.
+            if (typeof stage.onFrameFlushed === 'function')
+                stage.onFrameFlushed(localTimestamp, remoteTimestamp, renderedLogicalFrames);
+
             notifyFlushed(localTimestamp, remoteTimestamp, renderedLogicalFrames);
+
+        }
 
     };
 
@@ -572,7 +582,7 @@ Guacamole.Display = function(stage) {
      *     The newly-created layer.
      */
     this.createLayer = function() {
-        var layer = new Guacamole.Display.VisibleLayer(displayWidth, displayHeight);
+        var layer = new Guacamole.Display.VisibleLayer(displayWidth, displayHeight, stage);
         layer.move(default_layer, 0, 0, 0);
         return layer;
     };
@@ -2016,6 +2026,15 @@ Guacamole.Display.DOMStage = function DOMStage() {
 
     var stage = this;
 
+    /**
+     * The most recent scale applied via setScale(), cached so that
+     * consumers can query it without reading back from CSS.
+     *
+     * @private
+     * @type {!number}
+     */
+    var currentScale = 1;
+
     // Create display
     var display = document.createElement("div");
     display.style.position = "relative";
@@ -2089,12 +2108,23 @@ Guacamole.Display.DOMStage = function DOMStage() {
      *     The scale to apply, where 1.0 is 1:1 scale.
      */
     this.setScale = function setScale(scale) {
+        currentScale = scale;
         display.style.transform =
         display.style.WebkitTransform =
         display.style.MozTransform =
         display.style.OTransform =
         display.style.msTransform =
             "scale(" + scale + "," + scale + ")";
+    };
+
+    /**
+     * Returns the scale most recently applied via {@link #setScale}.
+     *
+     * @returns {!number}
+     *     The current scale, where 1.0 is 1:1 scale.
+     */
+    this.getScale = function getScale() {
+        return currentScale;
     };
 
     /**

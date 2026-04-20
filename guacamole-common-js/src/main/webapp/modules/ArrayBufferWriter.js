@@ -60,7 +60,7 @@ Guacamole.ArrayBufferWriter = function(stream) {
             binary += String.fromCharCode(bytes[i]);
 
         // Send as base64
-        stream.sendBlob(window.btoa(binary));
+        stream.sendBlob(btoa(binary));
 
     }
 

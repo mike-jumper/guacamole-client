@@ -52,7 +52,7 @@ Guacamole.ArrayBufferReader = function(stream) {
         // like fromBase64() are not available
         else {
 
-            var binary = window.atob(data);
+            var binary = atob(data);
             arrayBuffer = new ArrayBuffer(binary.length);
             bufferView = new Uint8Array(arrayBuffer);
 

@@ -421,20 +421,56 @@ angular.module('client').factory('ManagedClient', ['$rootScope', '$injector',
     ManagedClient.getInstance = function getInstance(id) {
 
         var tunnel;
+        var client;
 
-        // If WebSocket available, try to use it.
-        if ($window.WebSocket)
-            tunnel = new Guacamole.ChainedTunnel(
-                new Guacamole.WebSocketTunnel('websocket-tunnel'),
-                new Guacamole.HTTPTunnel('tunnel')
-            );
-        
-        // If no WebSocket, then use HTTP.
-        else
-            tunnel = new Guacamole.HTTPTunnel('tunnel');
+        // Opt into the worker-backed client only when:
+        //   (1) the consumer has explicitly requested it via "?worker=1",
+        //   (2) the library exposes Guacamole.WorkerClient (new module),
+        //   (3) the platform supports the worker primitives the client
+        //       relies on (Worker, OffscreenCanvas, ImageDecoder).
+        // Otherwise fall back to the previous main-thread code path.
+        var useWorker = !!(Guacamole.WorkerClient
+                && $window.Worker
+                && $window.OffscreenCanvas
+                && $window.ImageDecoder
+                && /[?&]worker=1\b/.test($window.location.search));
 
-        // Get new client instance
-        var client = new Guacamole.Client(tunnel);
+        if (useWorker) {
+
+            // Derive an absolute WebSocket URL for the tunnel. The worker
+            // does not have access to window.location, so the main thread
+            // must resolve this up front.
+            var wsScheme = $window.location.protocol === 'https:' ? 'wss' : 'ws';
+            var wsUrl = Guacamole.WorkerClient.resolveUrl('websocket-tunnel', wsScheme);
+
+            client = new Guacamole.WorkerClient({
+                workerUrl : 'guacamole-common-js/all.min.js',
+                tunnel    : {
+                    type : 'websocket',
+                    url  : wsUrl
+                }
+            });
+            tunnel = client.tunnel;
+
+        }
+
+        else {
+
+            // If WebSocket available, try to use it.
+            if ($window.WebSocket)
+                tunnel = new Guacamole.ChainedTunnel(
+                    new Guacamole.WebSocketTunnel('websocket-tunnel'),
+                    new Guacamole.HTTPTunnel('tunnel')
+                );
+
+            // If no WebSocket, then use HTTP.
+            else
+                tunnel = new Guacamole.HTTPTunnel('tunnel');
+
+            // Get new client instance
+            client = new Guacamole.Client(tunnel);
+
+        }
 
         // Associate new managed client with new client and tunnel
         var managedClient = new ManagedClient({
