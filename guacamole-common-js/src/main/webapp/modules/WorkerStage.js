@@ -45,6 +45,19 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
     var stage = this;
 
     /**
+     * Indicates to {@link Guacamole.Display} that this stage can safely
+     * execute drawing tasks as they are scheduled, rather than exclusively
+     * at frame-flush time. This is safe within a worker because the
+     * backing canvases are OffscreenCanvas instances that are never
+     * directly visible to the user; intermediate mid-frame pixel states
+     * are snapshot into an ImageBitmap at sync time and then shipped to
+     * the main thread, where consumption is rAF-gated.
+     *
+     * @type {!boolean}
+     */
+    this.supportsEagerRendering = true;
+
+    /**
      * Next container identifier to assign. Container identifiers are
      * monotonically increasing and unique within a single WorkerStage
      * instance.

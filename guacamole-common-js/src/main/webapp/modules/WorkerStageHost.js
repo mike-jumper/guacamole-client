@@ -62,14 +62,83 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
      * (the CSS compositor wrapper), an HTMLCanvasElement onto which the
      * worker's ImageBitmaps are drawn, and the 2D context of that canvas.
      *
+     * Each container also holds a single pending ImageBitmap slot. Bitmaps
+     * arriving from the worker replace whatever is already pending for that
+     * container (the superseded bitmap is closed to release its backing
+     * buffer). Painting happens lazily, once per animation frame.
+     *
      * @private
      * @type {!Object.<number, {
      *     container: !Guacamole.Display.Stage.LayerContainer,
      *     canvas: !HTMLCanvasElement,
-     *     context: !CanvasRenderingContext2D
+     *     context: !CanvasRenderingContext2D,
+     *     pendingBitmap: ?ImageBitmap
      * }>}
      */
     var containers = {};
+
+    /**
+     * Handle returned by the most recently-scheduled requestAnimationFrame
+     * call, or null if none is outstanding. Tracked so that painting is
+     * scheduled at most once per animation frame regardless of how many
+     * bitmaps arrive between one vsync and the next.
+     *
+     * @private
+     * @type {?number}
+     */
+    var paintRafHandle = null;
+
+    /**
+     * Schedules a painting pass for the next animation frame, if one is not
+     * already scheduled.
+     *
+     * @private
+     */
+    function schedulePaint() {
+        if (paintRafHandle !== null)
+            return;
+        paintRafHandle = requestAnimationFrame(paintPendingFrames);
+    }
+
+    /**
+     * Paints the most recently-received ImageBitmap for every container
+     * that has one pending, releasing the bitmap's backing resources as
+     * soon as it has been drawn. No-op for containers without a pending
+     * bitmap. Invoked from the animation-frame callback scheduled by
+     * {@link schedulePaint}.
+     *
+     * @private
+     */
+    function paintPendingFrames() {
+
+        paintRafHandle = null;
+
+        for (var id in containers) {
+
+            var entry = containers[id];
+            var bitmap = entry.pendingBitmap;
+            if (!bitmap)
+                continue;
+
+            // Keep the display canvas's backing resolution synchronized
+            // with the incoming bitmap so that per-frame transfers draw
+            // at 1:1 scale. This also covers races where a resize message
+            // has not yet been processed.
+            if (entry.canvas.width !== bitmap.width)
+                entry.canvas.width = bitmap.width;
+            if (entry.canvas.height !== bitmap.height)
+                entry.canvas.height = bitmap.height;
+
+            entry.context.clearRect(0, 0, entry.canvas.width, entry.canvas.height);
+            entry.context.drawImage(bitmap, 0, 0);
+
+            if (typeof bitmap.close === 'function')
+                bitmap.close();
+            entry.pendingBitmap = null;
+
+        }
+
+    }
 
     /**
      * Handler to be called when the worker posts a message that is not a
@@ -179,7 +248,8 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                 containers[message.containerId] = {
                     container: container,
                     canvas: canvas,
-                    context: context
+                    context: context,
+                    pendingBitmap: null
                 };
                 break;
             }
@@ -240,6 +310,8 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
             case 'layerContainer.dispose': {
                 var entry = containers[message.containerId];
                 if (entry) {
+                    if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
+                        entry.pendingBitmap.close();
                     entry.container.dispose();
                     delete containers[message.containerId];
                 }
@@ -256,22 +328,15 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                     break;
                 }
 
-                // Resize the display canvas to match the incoming bitmap if
-                // necessary. This covers cases where the worker has resized
-                // the underlying layer without the resize message having
-                // reached us yet, or where the two have otherwise drifted.
-                if (entry.canvas.width !== bitmap.width)
-                    entry.canvas.width = bitmap.width;
-                if (entry.canvas.height !== bitmap.height)
-                    entry.canvas.height = bitmap.height;
+                // Replace any bitmap still pending for this container.
+                // Only the most recent finalized frame is displayed; any
+                // earlier unpainted frame is dropped to bound memory and
+                // avoid wasted work.
+                if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
+                    entry.pendingBitmap.close();
+                entry.pendingBitmap = bitmap;
 
-                // Draw the latest frame. The bitmap replaces whatever was
-                // previously displayed for this layer.
-                entry.context.clearRect(0, 0, entry.canvas.width, entry.canvas.height);
-                entry.context.drawImage(bitmap, 0, 0);
-
-                if (typeof bitmap.close === 'function')
-                    bitmap.close();
+                schedulePaint();
                 break;
             }
 
@@ -381,6 +446,18 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
      */
     this.dispose = function dispose() {
         worker.removeEventListener('message', handleMessage);
+
+        if (paintRafHandle !== null) {
+            cancelAnimationFrame(paintRafHandle);
+            paintRafHandle = null;
+        }
+
+        for (var id in containers) {
+            var entry = containers[id];
+            if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
+                entry.pendingBitmap.close();
+            entry.pendingBitmap = null;
+        }
     };
 
 };
