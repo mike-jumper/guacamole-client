@@ -47,15 +47,23 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
     /**
      * Indicates to {@link Guacamole.Display} that this stage can safely
      * execute drawing tasks as they are scheduled, rather than exclusively
-     * at frame-flush time. This is safe within a worker because the
-     * backing canvases are OffscreenCanvas instances that are never
-     * directly visible to the user; intermediate mid-frame pixel states
-     * are snapshot into an ImageBitmap at sync time and then shipped to
-     * the main thread, where consumption is rAF-gated.
+     * at frame-flush time. This is technically safe within a worker
+     * because the backing canvases are OffscreenCanvas instances that are
+     * never directly visible to the user; intermediate mid-frame pixel
+     * states are only shipped to the main thread at sync time.
+     *
+     * In practice, however, executing tasks in a single batch at flush
+     * time has proven faster: canvas 2D calls benefit from cache locality
+     * and command-batching within the browser's rasterizer, and the
+     * overhead of advancing the execution cursor per scheduled task
+     * appears to dominate the savings from overlapping draw with parse.
+     * The option is therefore left off by default and kept as a flag for
+     * future experimentation; the eager-execution path in
+     * {@link Guacamole.Display} is itself still present and functional.
      *
      * @type {!boolean}
      */
-    this.supportsEagerRendering = true;
+    this.supportsEagerRendering = false;
 
     /**
      * Next container identifier to assign. Container identifiers are
