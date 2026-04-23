@@ -62,20 +62,39 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
      * (the CSS compositor wrapper), an HTMLCanvasElement onto which the
      * worker's ImageBitmaps are drawn, and the 2D context of that canvas.
      *
-     * Each container also holds a single pending ImageBitmap slot. Bitmaps
-     * arriving from the worker replace whatever is already pending for that
-     * container (the superseded bitmap is closed to release its backing
-     * buffer). Painting happens lazily, once per animation frame.
+     * Each container also holds a short queue of ImageBitmaps waiting to
+     * be painted. One bitmap is drained from the queue per animation
+     * frame so that steady-state playback proceeds at one visible frame
+     * per vsync. If the queue grows beyond {@link MAX_PENDING_FRAMES} the
+     * oldest pending bitmap is dropped on arrival to prevent unbounded
+     * backlog; this trades the occasional dropped frame for bounded
+     * latency when the worker out-produces the compositor.
      *
      * @private
      * @type {!Object.<number, {
      *     container: !Guacamole.Display.Stage.LayerContainer,
      *     canvas: !HTMLCanvasElement,
      *     context: !CanvasRenderingContext2D,
-     *     pendingBitmap: ?ImageBitmap
+     *     pendingBitmaps: !Array.<!ImageBitmap>
      * }>}
      */
     var containers = {};
+
+    /**
+     * Maximum number of ImageBitmaps permitted to queue per container
+     * awaiting paint. If a newly-arriving bitmap would push the queue
+     * beyond this limit, the oldest pending bitmap is dropped.
+     *
+     * Chosen generously enough to absorb brief phase misalignment between
+     * worker output and the compositor (one or two frames' worth of
+     * jitter) without dropping, while still bounding latency and memory
+     * usage when the worker bursts faster than the compositor can keep up.
+     *
+     * @private
+     * @constant
+     * @type {!number}
+     */
+    var MAX_PENDING_FRAMES = 3;
 
     /**
      * Handle returned by the most recently-scheduled requestAnimationFrame
@@ -101,11 +120,11 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
     }
 
     /**
-     * Paints the most recently-received ImageBitmap for every container
-     * that has one pending, releasing the bitmap's backing resources as
-     * soon as it has been drawn. No-op for containers without a pending
-     * bitmap. Invoked from the animation-frame callback scheduled by
-     * {@link schedulePaint}.
+     * Paints exactly one queued ImageBitmap per container, draining the
+     * oldest-first so that visible playback proceeds at the rate of the
+     * compositor rather than the worker. If any container still has
+     * queued bitmaps after painting, another animation frame is
+     * scheduled so that the backlog drains at one frame per vsync.
      *
      * @private
      */
@@ -113,12 +132,15 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
 
         paintRafHandle = null;
 
+        var anyStillPending = false;
+
         for (var id in containers) {
 
             var entry = containers[id];
-            var bitmap = entry.pendingBitmap;
-            if (!bitmap)
+            if (entry.pendingBitmaps.length === 0)
                 continue;
+
+            var bitmap = entry.pendingBitmaps.shift();
 
             // Keep the display canvas's backing resolution synchronized
             // with the incoming bitmap so that per-frame transfers draw
@@ -134,9 +156,15 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
 
             if (typeof bitmap.close === 'function')
                 bitmap.close();
-            entry.pendingBitmap = null;
+
+            if (entry.pendingBitmaps.length > 0)
+                anyStillPending = true;
 
         }
+
+        // Continue draining the backlog on subsequent animation frames.
+        if (anyStillPending)
+            schedulePaint();
 
     }
 
@@ -249,7 +277,7 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                     container: container,
                     canvas: canvas,
                     context: context,
-                    pendingBitmap: null
+                    pendingBitmaps: []
                 };
                 break;
             }
@@ -310,8 +338,11 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
             case 'layerContainer.dispose': {
                 var entry = containers[message.containerId];
                 if (entry) {
-                    if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
-                        entry.pendingBitmap.close();
+                    entry.pendingBitmaps.forEach(function closePending(bitmap) {
+                        if (bitmap && typeof bitmap.close === 'function')
+                            bitmap.close();
+                    });
+                    entry.pendingBitmaps.length = 0;
                     entry.container.dispose();
                     delete containers[message.containerId];
                 }
@@ -328,13 +359,16 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                     break;
                 }
 
-                // Replace any bitmap still pending for this container.
-                // Only the most recent finalized frame is displayed; any
-                // earlier unpainted frame is dropped to bound memory and
-                // avoid wasted work.
-                if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
-                    entry.pendingBitmap.close();
-                entry.pendingBitmap = bitmap;
+                // Enqueue for painting at the next animation frame. If the
+                // queue would exceed the cap, drop the oldest entries to
+                // keep latency and memory bounded; this only bites when
+                // the worker genuinely out-produces the compositor.
+                entry.pendingBitmaps.push(bitmap);
+                while (entry.pendingBitmaps.length > MAX_PENDING_FRAMES) {
+                    var dropped = entry.pendingBitmaps.shift();
+                    if (dropped && typeof dropped.close === 'function')
+                        dropped.close();
+                }
 
                 schedulePaint();
                 break;
@@ -454,9 +488,11 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
 
         for (var id in containers) {
             var entry = containers[id];
-            if (entry.pendingBitmap && typeof entry.pendingBitmap.close === 'function')
-                entry.pendingBitmap.close();
-            entry.pendingBitmap = null;
+            entry.pendingBitmaps.forEach(function closePending(bitmap) {
+                if (bitmap && typeof bitmap.close === 'function')
+                    bitmap.close();
+            });
+            entry.pendingBitmaps.length = 0;
         }
     };
 
