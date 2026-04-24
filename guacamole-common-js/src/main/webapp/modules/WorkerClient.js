@@ -52,6 +52,15 @@ var Guacamole = Guacamole || {};
  *     type-specific options. URLs must be absolute; use
  *     {@link Guacamole.WorkerClient.resolveUrl} when converting from a
  *     relative URL on the main thread.
+ *
+ * @param {Object} [options.debug]
+ *     Optional diagnostic flags forwarded to the worker. Recognized keys:
+ *     `logging` (boolean) — when true, the worker-side
+ *     {@link Guacamole.Client.debugTiming} flag is enabled, causing
+ *     sync-timing, state-change, and error events to be written to the
+ *     worker's console. This is parallel to enabling the same flag on
+ *     the main thread so that the same log format is emitted from both
+ *     contexts.
  */
 Guacamole.WorkerClient = function WorkerClient(options) {
 
@@ -69,6 +78,27 @@ Guacamole.WorkerClient = function WorkerClient(options) {
      * @type {!Worker}
      */
     var worker = new Worker(options.workerUrl);
+
+    // Surface any worker-loading or uncaught worker-side errors out as
+    // client-level errors so that consumers can react rather than
+    // silently failing to connect.
+    worker.addEventListener('error', function workerLoadError(event) {
+        if (client.onerror)
+            client.onerror({
+                code: 0,
+                message: event.message
+                        ? 'Worker error: ' + event.message
+                        : 'Worker failed to load or threw an uncaught error.'
+            });
+    });
+
+    worker.addEventListener('messageerror', function workerMessageError() {
+        if (client.onerror)
+            client.onerror({
+                code: 0,
+                message: 'Worker message channel deserialization error.'
+            });
+    });
 
     /**
      * Main-thread receiver for compositor messages posted by the worker.
@@ -106,6 +136,30 @@ Guacamole.WorkerClient = function WorkerClient(options) {
     var currentDisplayHeight = 0;
 
     /**
+     * The statistic window last assigned via displayFacade.statisticWindow.
+     * Mirrored here so reads are local and so that the value can be
+     * propagated to the worker on assignment.
+     *
+     * @private
+     * @type {!number}
+     */
+    var currentStatisticWindow = 0;
+
+    /**
+     * Recomputes the outer bounds size of the display based on the most
+     * recently-known display dimensions and scale, and applies it via the
+     * main-thread {@link Guacamole.Display.DOMStage}. Invoked whenever
+     * either display dimensions or scale changes.
+     *
+     * @private
+     */
+    function applyBoundsSize() {
+        var stage = host.getDOMStage();
+        var scale = stage.getScale() || 1;
+        stage.setBoundsSize(currentDisplayWidth * scale, currentDisplayHeight * scale);
+    }
+
+    /**
      * Main-thread facade that mimics the relevant portion of
      * {@link Guacamole.Display}, delegating DOM and compositor operations
      * to the main-thread stage while tracking dimensions reported by the
@@ -141,6 +195,7 @@ Guacamole.WorkerClient = function WorkerClient(options) {
          */
         scale: function scale(s) {
             host.getDOMStage().setScale(s);
+            applyBoundsSize();
         },
 
         /**
@@ -191,9 +246,38 @@ Guacamole.WorkerClient = function WorkerClient(options) {
          * @param {!number} x
          * @param {!number} y
          */
-        oncursor: null
+        oncursor: null,
+
+        /**
+         * Fired whenever performance statistics become available from the
+         * worker-side {@link Guacamole.Display}. Only fires when
+         * {@link #statisticWindow} is non-zero.
+         *
+         * @event
+         * @param {!Guacamole.Display.Statistics} stats
+         */
+        onstatistics: null
 
     };
+
+    // statisticWindow is exposed as a property on the facade so that
+    // existing consumers (notably the guacamole-display-statistics
+    // extension) can assign to it using the same syntax as on an
+    // ordinary Guacamole.Display. Assignment propagates the value across
+    // the worker boundary so the worker-side Display actually gathers
+    // statistics.
+    Object.defineProperty(displayFacade, 'statisticWindow', {
+        enumerable: true,
+        configurable: false,
+        get: function () { return currentStatisticWindow; },
+        set: function (value) {
+            currentStatisticWindow = value;
+            worker.postMessage({
+                type: 'display.setStatisticWindow',
+                window: value
+            });
+        }
+    });
 
     /**
      * Main-thread facade that mimics the relevant portion of
@@ -435,15 +519,6 @@ Guacamole.WorkerClient = function WorkerClient(options) {
      * @param {!string} id
      */
     this.onleave = null;
-
-    /**
-     * Fired whenever performance statistics are available from the
-     * worker-side Display.
-     *
-     * @event
-     * @param {!Guacamole.Display.Statistics} stats
-     */
-    this.onstatistics = null;
 
     /**
      * Fired when the remote end declares multi-touch support.
@@ -954,6 +1029,11 @@ Guacamole.WorkerClient = function WorkerClient(options) {
             case 'display.resize':
                 currentDisplayWidth = message.width;
                 currentDisplayHeight = message.height;
+                // Recompute the outer bounds size to reflect the new display
+                // dimensions combined with the current main-thread scale.
+                // This is the piece the worker can't do on its own, since
+                // scale is kept main-thread-side only.
+                applyBoundsSize();
                 if (displayFacade.onresize)
                     displayFacade.onresize(message.width, message.height);
                 break;
@@ -985,8 +1065,13 @@ Guacamole.WorkerClient = function WorkerClient(options) {
             }
 
             case 'display.statistics':
-                if (client.onstatistics)
-                    client.onstatistics(message.stats);
+                // Statistics are a Display-level concern. Route through
+                // the display facade to match the shape of the original
+                // Guacamole.Display API, where consumers assign to
+                // display.onstatistics rather than client.onstatistics.
+                if (displayFacade.onstatistics)
+                    displayFacade.onstatistics(
+                            new Guacamole.Display.Statistics(message.stats));
                 break;
 
             case 'frame':
@@ -1009,7 +1094,8 @@ Guacamole.WorkerClient = function WorkerClient(options) {
     // Kick off worker initialization
     worker.postMessage({
         type: 'init',
-        tunnel: options.tunnel
+        tunnel: options.tunnel,
+        debug: options.debug || null
     });
 
 };

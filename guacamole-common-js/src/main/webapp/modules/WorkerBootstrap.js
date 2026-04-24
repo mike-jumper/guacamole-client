@@ -495,6 +495,15 @@ Guacamole.WorkerBootstrap.install = function install(port) {
 
         try {
 
+            // Propagate the debug flag across the worker boundary so
+            // that worker-side Guacamole.Client emits timing logs with
+            // the same format as main-thread Guacamole.Client.
+            if (message.debug && message.debug.logging)
+                Guacamole.Client.debugTiming = true;
+
+            Guacamole.Client.logTiming('worker init',
+                    'tunnel type=' + (message.tunnel && message.tunnel.type));
+
             state.tunnel = createTunnel(message.tunnel);
             state.stage = new Guacamole.Display.WorkerStage(port);
             state.display = new Guacamole.Display(state.stage);
@@ -572,6 +581,11 @@ Guacamole.WorkerBootstrap.install = function install(port) {
             case 'display.showCursor':
                 if (state.display)
                     state.display.showCursor(message.shown);
+                break;
+
+            case 'display.setStatisticWindow':
+                if (state.display)
+                    state.display.statisticWindow = message.window;
                 break;
 
             //

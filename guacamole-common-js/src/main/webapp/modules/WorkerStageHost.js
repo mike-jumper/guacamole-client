@@ -20,6 +20,27 @@
 var Guacamole = Guacamole || {};
 
 /**
+ * Server timestamp of the most recent `frame` sentinel received from any
+ * worker-backed Display on the main thread. Used to compute the server-
+ * side frame duration (the delta between successive sync timestamps).
+ *
+ * @private
+ * @type {?number}
+ */
+var __guacWorkerFrameLastServerTs = null;
+
+/**
+ * Wall-clock time (Unix epoch ms) at which the most recent worker-backed
+ * frame was marked as received by the worker-side Display (i.e.,
+ * Frame.localTimestamp at construction time). Used to compute the
+ * client-side frame duration.
+ *
+ * @private
+ * @type {?number}
+ */
+var __guacWorkerFrameLastClientTime = null;
+
+/**
  * Main-thread receiver for compositor messages originating from a
  * {@link Guacamole.Display.WorkerStage}. The host owns a main-thread
  * {@link Guacamole.Display.DOMStage} through which every DOM-related
@@ -61,112 +82,17 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
      * created by the worker is represented here by a DOMStage LayerContainer
      * (the CSS compositor wrapper), an HTMLCanvasElement onto which the
      * worker's ImageBitmaps are drawn, and the 2D context of that canvas.
-     *
-     * Each container also holds a short queue of ImageBitmaps waiting to
-     * be painted. One bitmap is drained from the queue per animation
-     * frame so that steady-state playback proceeds at one visible frame
-     * per vsync. If the queue grows beyond {@link MAX_PENDING_FRAMES} the
-     * oldest pending bitmap is dropped on arrival to prevent unbounded
-     * backlog; this trades the occasional dropped frame for bounded
-     * latency when the worker out-produces the compositor.
+     * Bitmaps arriving from the worker are drawn immediately on receipt;
+     * no queue or animation-frame gating is applied.
      *
      * @private
      * @type {!Object.<number, {
      *     container: !Guacamole.Display.Stage.LayerContainer,
      *     canvas: !HTMLCanvasElement,
-     *     context: !CanvasRenderingContext2D,
-     *     pendingBitmaps: !Array.<!ImageBitmap>
+     *     context: !CanvasRenderingContext2D
      * }>}
      */
     var containers = {};
-
-    /**
-     * Maximum number of ImageBitmaps permitted to queue per container
-     * awaiting paint. If a newly-arriving bitmap would push the queue
-     * beyond this limit, the oldest pending bitmap is dropped.
-     *
-     * Chosen generously enough to absorb brief phase misalignment between
-     * worker output and the compositor (one or two frames' worth of
-     * jitter) without dropping, while still bounding latency and memory
-     * usage when the worker bursts faster than the compositor can keep up.
-     *
-     * @private
-     * @constant
-     * @type {!number}
-     */
-    var MAX_PENDING_FRAMES = 3;
-
-    /**
-     * Handle returned by the most recently-scheduled requestAnimationFrame
-     * call, or null if none is outstanding. Tracked so that painting is
-     * scheduled at most once per animation frame regardless of how many
-     * bitmaps arrive between one vsync and the next.
-     *
-     * @private
-     * @type {?number}
-     */
-    var paintRafHandle = null;
-
-    /**
-     * Schedules a painting pass for the next animation frame, if one is not
-     * already scheduled.
-     *
-     * @private
-     */
-    function schedulePaint() {
-        if (paintRafHandle !== null)
-            return;
-        paintRafHandle = requestAnimationFrame(paintPendingFrames);
-    }
-
-    /**
-     * Paints exactly one queued ImageBitmap per container, draining the
-     * oldest-first so that visible playback proceeds at the rate of the
-     * compositor rather than the worker. If any container still has
-     * queued bitmaps after painting, another animation frame is
-     * scheduled so that the backlog drains at one frame per vsync.
-     *
-     * @private
-     */
-    function paintPendingFrames() {
-
-        paintRafHandle = null;
-
-        var anyStillPending = false;
-
-        for (var id in containers) {
-
-            var entry = containers[id];
-            if (entry.pendingBitmaps.length === 0)
-                continue;
-
-            var bitmap = entry.pendingBitmaps.shift();
-
-            // Keep the display canvas's backing resolution synchronized
-            // with the incoming bitmap so that per-frame transfers draw
-            // at 1:1 scale. This also covers races where a resize message
-            // has not yet been processed.
-            if (entry.canvas.width !== bitmap.width)
-                entry.canvas.width = bitmap.width;
-            if (entry.canvas.height !== bitmap.height)
-                entry.canvas.height = bitmap.height;
-
-            entry.context.clearRect(0, 0, entry.canvas.width, entry.canvas.height);
-            entry.context.drawImage(bitmap, 0, 0);
-
-            if (typeof bitmap.close === 'function')
-                bitmap.close();
-
-            if (entry.pendingBitmaps.length > 0)
-                anyStillPending = true;
-
-        }
-
-        // Continue draining the backlog on subsequent animation frames.
-        if (anyStillPending)
-            schedulePaint();
-
-    }
 
     /**
      * Handler to be called when the worker posts a message that is not a
@@ -276,8 +202,7 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                 containers[message.containerId] = {
                     container: container,
                     canvas: canvas,
-                    context: context,
-                    pendingBitmaps: []
+                    context: context
                 };
                 break;
             }
@@ -338,11 +263,6 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
             case 'layerContainer.dispose': {
                 var entry = containers[message.containerId];
                 if (entry) {
-                    entry.pendingBitmaps.forEach(function closePending(bitmap) {
-                        if (bitmap && typeof bitmap.close === 'function')
-                            bitmap.close();
-                    });
-                    entry.pendingBitmaps.length = 0;
                     entry.container.dispose();
                     delete containers[message.containerId];
                 }
@@ -359,18 +279,25 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
                     break;
                 }
 
-                // Enqueue for painting at the next animation frame. If the
-                // queue would exceed the cap, drop the oldest entries to
-                // keep latency and memory bounded; this only bites when
-                // the worker genuinely out-produces the compositor.
-                entry.pendingBitmaps.push(bitmap);
-                while (entry.pendingBitmaps.length > MAX_PENDING_FRAMES) {
-                    var dropped = entry.pendingBitmaps.shift();
-                    if (dropped && typeof dropped.close === 'function')
-                        dropped.close();
-                }
+                // Keep the display canvas's backing resolution synchronized
+                // with the incoming bitmap. This covers cases where the
+                // worker has resized the underlying layer without the
+                // resize message having reached us yet, or where the two
+                // have otherwise drifted.
+                if (entry.canvas.width !== bitmap.width)
+                    entry.canvas.width = bitmap.width;
+                if (entry.canvas.height !== bitmap.height)
+                    entry.canvas.height = bitmap.height;
 
-                schedulePaint();
+                // Paint immediately. The compositor will pick up the new
+                // canvas state at its next vsync. If a newer bitmap
+                // arrives before then, it simply overwrites this paint
+                // before the compositor ever sees the intermediate state.
+                entry.context.clearRect(0, 0, entry.canvas.width, entry.canvas.height);
+                entry.context.drawImage(bitmap, 0, 0);
+
+                if (typeof bitmap.close === 'function')
+                    bitmap.close();
                 break;
             }
 
@@ -434,8 +361,53 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
             }
 
             case 'frame':
-                // Frame boundary from the worker. Surfaced to the facade
-                // so that statistics/events can propagate outward.
+
+                // Emit a single aligned timing log line for this frame.
+                // The worker posts this sentinel only after every bitmap
+                // for the frame has been postMessage'd, and main
+                // processes messages serially, so by the time this
+                // handler runs all bitmaps for this frame have already
+                // been painted onto their respective display canvases.
+                // That makes this the correct moment to compute the
+                // full-pipeline render time.
+                if (Guacamole.Client.debugTiming) {
+
+                    var serverTs = message.remoteTimestamp;
+
+                    // clientTime and renderNow must share a clock across
+                    // the worker/main boundary. Frame.localTimestamp is
+                    // set with Date.now() in the worker, so we use
+                    // Date.now() on main to match.
+                    var clientTime = message.localTimestamp;
+                    var renderNow = Date.now();
+
+                    var serverDur = __guacWorkerFrameLastServerTs !== null
+                            ? (serverTs - __guacWorkerFrameLastServerTs) + 'ms'
+                            : '-';
+                    var clientDur = __guacWorkerFrameLastClientTime !== null
+                            ? (clientTime - __guacWorkerFrameLastClientTime) + 'ms'
+                            : '-';
+                    var latency = (__guacWorkerFrameLastServerTs !== null
+                            && __guacWorkerFrameLastClientTime !== null)
+                            ? ((clientTime - __guacWorkerFrameLastClientTime)
+                                - (serverTs - __guacWorkerFrameLastServerTs)) + 'ms'
+                            : '-';
+                    var render = (renderNow - clientTime) + 'ms';
+
+                    Guacamole.Client.logTiming('frame',
+                            'server_ts=' + serverTs,
+                            'server_dur=' + serverDur,
+                            'client_dur=' + clientDur,
+                            'latency=' + latency,
+                            'render=' + render);
+
+                    __guacWorkerFrameLastServerTs = serverTs;
+                    __guacWorkerFrameLastClientTime = clientTime;
+
+                }
+
+                // Surfaced to the facade so that statistics/events can
+                // propagate outward.
                 if (host.onmessage)
                     host.onmessage(message);
                 break;
@@ -480,20 +452,6 @@ Guacamole.Display.WorkerStageHost = function WorkerStageHost(worker, domStage) {
      */
     this.dispose = function dispose() {
         worker.removeEventListener('message', handleMessage);
-
-        if (paintRafHandle !== null) {
-            cancelAnimationFrame(paintRafHandle);
-            paintRafHandle = null;
-        }
-
-        for (var id in containers) {
-            var entry = containers[id];
-            entry.pendingBitmaps.forEach(function closePending(bitmap) {
-                if (bitmap && typeof bitmap.close === 'function')
-                    bitmap.close();
-            });
-            entry.pendingBitmaps.length = 0;
-        }
     };
 
 };

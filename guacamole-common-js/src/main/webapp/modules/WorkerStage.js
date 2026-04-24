@@ -45,27 +45,6 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
     var stage = this;
 
     /**
-     * Indicates to {@link Guacamole.Display} that this stage can safely
-     * execute drawing tasks as they are scheduled, rather than exclusively
-     * at frame-flush time. This is technically safe within a worker
-     * because the backing canvases are OffscreenCanvas instances that are
-     * never directly visible to the user; intermediate mid-frame pixel
-     * states are only shipped to the main thread at sync time.
-     *
-     * In practice, however, executing tasks in a single batch at flush
-     * time has proven faster: canvas 2D calls benefit from cache locality
-     * and command-batching within the browser's rasterizer, and the
-     * overhead of advancing the execution cursor per scheduled task
-     * appears to dominate the savings from overlapping draw with parse.
-     * The option is therefore left off by default and kept as a flag for
-     * future experimentation; the eager-execution path in
-     * {@link Guacamole.Display} is itself still present and functional.
-     *
-     * @type {!boolean}
-     */
-    this.supportsEagerRendering = false;
-
-    /**
      * Next container identifier to assign. Container identifiers are
      * monotonically increasing and unique within a single WorkerStage
      * instance.
@@ -142,23 +121,30 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
      */
     this.onFrameFlushed = function onFrameFlushed(localTimestamp, remoteTimestamp, logicalFrames) {
 
-        // Capture every known visible layer. Capture is asynchronous; bitmaps
-        // are posted to the main thread as they become available.
+        // Capture every known visible layer. Each capture returns a
+        // Promise that resolves once the bitmap has been posted via
+        // postMessage, so that the frame sentinel below is guaranteed to
+        // be delivered to the main thread strictly after all of this
+        // frame's bitmaps.
+        var captures = [];
         for (var idString in containers) {
             var container = containers[idString];
             if (container)
-                container.__captureAndPost();
+                captures.push(container.__captureAndPost());
         }
 
-        // Signal to the main thread that a frame boundary has passed. This
-        // is posted regardless of whether any layers produced new content so
-        // that statistics and other frame-synchronous events can fire on the
-        // main thread.
-        stage.__post({
-            type: 'frame',
-            localTimestamp: localTimestamp,
-            remoteTimestamp: remoteTimestamp,
-            logicalFrames: logicalFrames
+        // Signal to the main thread that a frame boundary has passed.
+        // Posted only after every bitmap for this frame has been
+        // postMessage'd so that the sentinel arrives last in order; the
+        // main thread uses this to emit a single aligned frame-timing
+        // log line once the frame is visibly complete.
+        Promise.all(captures).then(function framePosted() {
+            stage.__post({
+                type: 'frame',
+                localTimestamp: localTimestamp,
+                remoteTimestamp: remoteTimestamp,
+                logicalFrames: logicalFrames
+            });
         });
 
     };
@@ -185,19 +171,24 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
         });
     };
 
-    this.setBoundsSize = function setBoundsSize(width, height) {
-        stage.__post({
-            type: 'stage.setBoundsSize',
-            width: width,
-            height: height
-        });
+    /**
+     * The bounds size is a function of the logical display dimensions and
+     * the current display scale. Scale is a main-thread-only CSS concern
+     * that the worker does not track; the main-thread host therefore
+     * computes and applies bounds size itself, so this stage method is a
+     * no-op.
+     */
+    this.setBoundsSize = function setBoundsSize() {
+        // Intentionally no-op; see above.
     };
 
-    this.setScale = function setScale(scale) {
-        stage.__post({
-            type: 'stage.setScale',
-            scale: scale
-        });
+    /**
+     * Display scale is purely a main-thread CSS transform. The WorkerClient
+     * facade owns it directly, so no message need cross the worker
+     * boundary when scale changes.
+     */
+    this.setScale = function setScale() {
+        // Intentionally no-op; see above.
     };
 
     this.attachTopLevelLayer = function attachTopLevelLayer(layer) {
@@ -420,22 +411,25 @@ Guacamole.Display.WorkerStage.LayerContainer = function WorkerLayerContainer(sta
 
     /**
      * Captures the current contents of the backing canvas as an ImageBitmap
-     * and posts it to the main thread for display.
+     * via createImageBitmap() and posts it to the main thread for display.
+     * Returns a Promise that resolves once the bitmap message has been
+     * posted (i.e. added to the channel's outgoing queue). The frame
+     * sentinel in {@link Guacamole.Display.WorkerStage#onFrameFlushed}
+     * uses this to ensure it is posted strictly after all bitmap
+     * messages for the frame.
      *
      * @private
+     * @returns {!Promise}
      */
     this.__captureAndPost = function __captureAndPost() {
 
-        // createImageBitmap on an OffscreenCanvas produces a new ImageBitmap
-        // reflecting the current contents without resetting the source
-        // canvas, unlike transferToImageBitmap which resets.
-        if (typeof createImageBitmap !== 'function')
-            return;
-
         if (!backingCanvas || !backingCanvas.width || !backingCanvas.height)
-            return;
+            return Promise.resolve();
 
-        createImageBitmap(backingCanvas).then(function bitmapReady(bitmap) {
+        if (typeof createImageBitmap !== 'function')
+            return Promise.resolve();
+
+        return createImageBitmap(backingCanvas).then(function bitmapReady(bitmap) {
             stage.__post({
                 type: 'layerContainer.frame',
                 containerId: id,

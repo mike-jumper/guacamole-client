@@ -165,17 +165,6 @@ Guacamole.Display = function(stage) {
     var tasks = [];
 
     /**
-     * The index of the next task in {@link tasks} that has not yet been
-     * executed by {@link advanceEagerExecution}. Only used when eager
-     * rendering is enabled; otherwise tasks are executed exclusively by
-     * {@link Frame#flush}.
-     *
-     * @private
-     * @type {!number}
-     */
-    var pendingTaskCursor = 0;
-
-    /**
      * The queue of all frames. Each frame is a pairing of an array of tasks
      * and a callback which must be called when the frame is rendered.
      *
@@ -183,19 +172,6 @@ Guacamole.Display = function(stage) {
      * @type {!Frame[]}
      */
     var frames = [];
-
-    /**
-     * Whether the owning stage permits tasks to be executed as they are
-     * scheduled, rather than only at frame-flush time. When this is true,
-     * {@link scheduleTask} advances execution eagerly through any unblocked
-     * prefix of pending tasks; when false (the default), tasks accumulate
-     * and execute together during {@link Frame#flush}, preserving the
-     * atomic-frame behavior relied upon by DOM-composited displays.
-     *
-     * @private
-     * @type {!boolean}
-     */
-    var eagerRendering = !!stage.supportsEagerRendering;
 
     /**
      * Flushes all pending frames synchronously. This function will block until
@@ -376,28 +352,6 @@ Guacamole.Display = function(stage) {
     var Frame = function Frame(callback, tasks, timestamp, logicalFrames) {
 
         /**
-         * The tasks associated with this frame, in execution order. Exposed
-         * to allow eager execution of unblocked-prefix tasks from outside
-         * the Frame.
-         *
-         * @private
-         * @type {!Task[]}
-         */
-        this._tasks = tasks;
-
-        /**
-         * The number of tasks within this frame that have already been
-         * executed via the eager-execution path. Tasks at indices less than
-         * this value are guaranteed to have run; tasks at this index or
-         * beyond are either blocked or still waiting for their prefix to
-         * complete.
-         *
-         * @private
-         * @type {!number}
-         */
-        this._executedUpTo = 0;
-
-        /**
          * The local timestamp of the point in time at which this frame was
          * received by the display, in milliseconds since the Unix Epoch.
          *
@@ -509,24 +463,12 @@ Guacamole.Display = function(stage) {
         this.blocked = blocked;
 
         /**
-         * Whether this Task has already run to completion. Once set, further
-         * calls to {@link #execute} are no-ops. This is required so that
-         * eager execution and the usual frame-flush loop can coexist without
-         * the task's handler firing twice.
-         *
-         * @private
-         * @type {!boolean}
-         */
-        this.executed = false;
-
-        /**
          * Cancels this task such that it will not run. The task handler
          * provided at construction time, if any, is not invoked. Calling
          * execute() after calling this function has no effect.
          */
         this.cancel = function cancel() {
             task.blocked = false;
-            task.executed = true;
             taskHandler = null;
         };
 
@@ -536,26 +478,17 @@ Guacamole.Display = function(stage) {
         this.unblock = function() {
             if (task.blocked) {
                 task.blocked = false;
-
-                if (eagerRendering)
-                    advanceEagerExecution();
-
                 if (frames.length)
                     __flush_frames();
-
             }
         };
 
         /**
-         * Calls the handler associated with this task IMMEDIATELY. Further
-         * invocations are no-ops; this allows eager execution at schedule
-         * time to coexist with the usual frame-flush loop without invoking
-         * the task's handler more than once.
+         * Calls the handler associated with this task IMMEDIATELY. This
+         * function does not track whether this task is marked as blocked.
+         * Enforcing the blocked status of tasks is up to the caller.
          */
         this.execute = function() {
-            if (task.executed)
-                return;
-            task.executed = true;
             if (taskHandler) taskHandler();
         };
 
@@ -580,46 +513,7 @@ Guacamole.Display = function(stage) {
     function scheduleTask(handler, blocked) {
         var task = new Task(handler, blocked);
         tasks.push(task);
-        if (eagerRendering)
-            advanceEagerExecution();
         return task;
-    }
-
-    /**
-     * Executes as many tasks as possible, in order, without waiting for a
-     * frame flush. Execution advances through every unflushed frame's task
-     * list and then into the current pending {@link tasks} array, stopping
-     * at the first blocked task. Safe to invoke when eager rendering is
-     * disabled — it will simply have no observable effect beyond a single
-     * cursor check.
-     *
-     * @private
-     */
-    function advanceEagerExecution() {
-
-        // Drain each unflushed frame in order before touching the pending
-        // queue. Tasks across frames must execute in strict order because
-        // the underlying layer canvas is shared.
-        for (var i = 0; i < frames.length; i++) {
-            var frame = frames[i];
-            while (frame._executedUpTo < frame._tasks.length) {
-                var frameTask = frame._tasks[frame._executedUpTo];
-                if (frameTask.blocked)
-                    return;
-                frameTask.execute();
-                frame._executedUpTo++;
-            }
-        }
-
-        // Continue into the pending (unflushed) tasks array.
-        while (pendingTaskCursor < tasks.length) {
-            var pendingTask = tasks[pendingTaskCursor];
-            if (pendingTask.blocked)
-                return;
-            pendingTask.execute();
-            pendingTaskCursor++;
-        }
-
     }
 
     /**
@@ -726,18 +620,8 @@ Guacamole.Display = function(stage) {
     this.flush = function(callback, timestamp, logicalFrames) {
 
         // Add frame, reset tasks
-        var frame = new Frame(callback, tasks, timestamp, logicalFrames);
-
-        // Carry over the eager-execution progress from the pending queue.
-        // Tasks already executed do not need to run again when the frame
-        // is flushed; Task.execute is idempotent in any case, but keeping
-        // the cursor accurate avoids wasted Frame.isReady() work and keeps
-        // state consistent for future calls to advanceEagerExecution.
-        frame._executedUpTo = pendingTaskCursor;
-
-        frames.push(frame);
+        frames.push(new Frame(callback, tasks, timestamp, logicalFrames));
         tasks = [];
-        pendingTaskCursor = 0;
 
         // Attempt flush
         __flush_frames();
@@ -762,7 +646,6 @@ Guacamole.Display = function(stage) {
         });
 
         tasks = [];
-        pendingTaskCursor = 0;
 
     };
 

@@ -423,6 +423,12 @@ angular.module('client').factory('ManagedClient', ['$rootScope', '$injector',
         var tunnel;
         var client;
 
+        // Enable timing-diagnostic logging in Guacamole.Client so the
+        // worker-backed and main-thread paths emit directly-comparable
+        // console logs. Remove this assignment once the worker path is
+        // considered stable.
+        Guacamole.Client.debugTiming = true;
+
         // Opt into the worker-backed client only when:
         //   (1) the consumer has explicitly requested it via "?worker=1",
         //   (2) the library exposes Guacamole.WorkerClient (new module),
@@ -448,6 +454,13 @@ angular.module('client').factory('ManagedClient', ['$rootScope', '$injector',
                 tunnel    : {
                     type : 'websocket',
                     url  : wsUrl
+                },
+                // Enable verbose worker-side diagnostic logging so
+                // responsiveness and connect-path issues can be traced via
+                // the DevTools console. Remove this block once the worker
+                // path is considered stable.
+                debug : {
+                    logging : true
                 }
             });
             tunnel = client.tunnel;

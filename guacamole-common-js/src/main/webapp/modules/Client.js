@@ -20,6 +20,42 @@
 var Guacamole = Guacamole || {};
 
 /**
+ * Prefix used by {@link Guacamole.Client.logTiming} when emitting
+ * diagnostic log lines. The prefix reflects the execution context so
+ * that logs captured from the main thread and logs captured from a Web
+ * Worker can be distinguished when interleaved.
+ *
+ * @private
+ * @constant
+ * @type {!string}
+ */
+var __guacClientLogPrefix = (typeof document === 'undefined'
+        && typeof importScripts === 'function')
+    ? '[guac-worker '
+    : '[guac-main ';
+
+/**
+ * The server-generated timestamp reported by the most recent sync
+ * instruction observed by any Guacamole.Client in the current execution
+ * context. Used to compute per-frame server-timestamp deltas for
+ * diagnostic logging. Reset to null between connections.
+ *
+ * @private
+ * @type {?number}
+ */
+var __lastSyncServerTimestamp = null;
+
+/**
+ * The high-resolution client wall-clock time at which the most recent
+ * sync instruction was received by any Guacamole.Client in the current
+ * execution context. Used to compute per-frame client-side deltas.
+ *
+ * @private
+ * @type {?number}
+ */
+var __lastSyncClientTime = null;
+
+/**
  * Guacamole protocol client. Given a {@link Guacamole.Tunnel},
  * automatically handles incoming and outgoing Guacamole instructions via the
  * provided tunnel, updating its display using one or more canvas elements.
@@ -1683,6 +1719,8 @@ Guacamole.Client = function(tunnel, display) {
             var timestamp = parseInt(parameters[0]);
             var frames = parameters[1] ? parseInt(parameters[1]) : 0;
 
+            var syncReceivedAt = performance.now();
+
             // Flush display, send sync when done
             display.flush(function displaySyncComplete() {
 
@@ -1697,6 +1735,42 @@ Guacamole.Client = function(tunnel, display) {
                 if (timestamp !== currentTimestamp) {
                     tunnel.sendMessage("sync", timestamp);
                     currentTimestamp = timestamp;
+                }
+
+                // Emit an aligned per-frame timing log on the main
+                // thread only. The worker-backed path emits its own
+                // equivalent log from WorkerStageHost when the frame
+                // sentinel arrives, so worker-side Client.js
+                // executions deliberately skip this emission.
+                if (Guacamole.Client.debugTiming
+                        && typeof document !== 'undefined'
+                        && typeof importScripts === 'undefined') {
+
+                    var frameVisibleAt = performance.now();
+
+                    var serverDur = __lastSyncServerTimestamp !== null
+                            ? (timestamp - __lastSyncServerTimestamp) + 'ms'
+                            : '-';
+                    var clientDur = __lastSyncClientTime !== null
+                            ? (syncReceivedAt - __lastSyncClientTime).toFixed(3) + 'ms'
+                            : '-';
+                    var latency = (__lastSyncServerTimestamp !== null
+                            && __lastSyncClientTime !== null)
+                            ? ((syncReceivedAt - __lastSyncClientTime)
+                                - (timestamp - __lastSyncServerTimestamp)).toFixed(3) + 'ms'
+                            : '-';
+                    var render = (frameVisibleAt - syncReceivedAt).toFixed(3) + 'ms';
+
+                    Guacamole.Client.logTiming('frame',
+                            'server_ts=' + timestamp,
+                            'server_dur=' + serverDur,
+                            'client_dur=' + clientDur,
+                            'latency=' + latency,
+                            'render=' + render);
+
+                    __lastSyncServerTimestamp = timestamp;
+                    __lastSyncClientTime = syncReceivedAt;
+
                 }
 
             }, timestamp, frames);
@@ -1909,8 +1983,42 @@ Guacamole.Client = function(tunnel, display) {
 };
 
 /**
+ * Whether timing-diagnostic logging should be emitted by
+ * {@link Guacamole.Client} and related components. When true, significant
+ * timing events (client state changes, sync reception, sync ACK
+ * transmission, client errors) are written to the console via
+ * {@link Guacamole.Client.logTiming} with a high-resolution monotonic
+ * timestamp and an execution-context-detected prefix.
+ *
+ * Useful for comparing responsiveness between the worker-backed path
+ * (Guacamole.WorkerClient) and the main-thread path (Guacamole.Client),
+ * as the same log lines will be emitted from both provided the flag is
+ * set in the appropriate execution context.
+ *
+ * @type {!boolean}
+ */
+Guacamole.Client.debugTiming = false;
+
+/**
+ * Emits a single diagnostic timing log line if
+ * {@link Guacamole.Client.debugTiming} is true. Intended for internal
+ * use by Guacamole.Client and its peer modules (Tunnel, Display,
+ * WorkerBootstrap), but safe to call externally.
+ *
+ * @param {...*} args
+ *     Arguments to log, appended after the prefix/timestamp.
+ */
+Guacamole.Client.logTiming = function logTiming() {
+    if (!Guacamole.Client.debugTiming)
+        return;
+    var prefix = __guacClientLogPrefix + performance.now().toFixed(3) + 'ms]';
+    console.debug.apply(console,
+            [prefix].concat(Array.prototype.slice.call(arguments)));
+};
+
+/**
  * All possible Guacamole Client states.
- * 
+ *
  * @type {!Object.<string, number>}
  */
 Guacamole.Client.State = {
