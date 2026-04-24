@@ -423,23 +423,16 @@ angular.module('client').factory('ManagedClient', ['$rootScope', '$injector',
         var tunnel;
         var client;
 
-        // Enable timing-diagnostic logging in Guacamole.Client so the
-        // worker-backed and main-thread paths emit directly-comparable
-        // console logs. Remove this assignment once the worker path is
-        // considered stable.
-        Guacamole.Client.debugTiming = true;
-
-        // Opt into the worker-backed client only when:
-        //   (1) the consumer has explicitly requested it via "?worker=1",
-        //   (2) the library exposes Guacamole.WorkerClient (new module),
-        //   (3) the platform supports the worker primitives the client
-        //       relies on (Worker, OffscreenCanvas, ImageDecoder).
-        // Otherwise fall back to the previous main-thread code path.
+        // Prefer the worker-backed client when the library exposes it and
+        // the browser supports the primitives it depends on (dedicated
+        // Workers, OffscreenCanvas, and ImageDecoder). This moves
+        // protocol parsing and rendering off the main thread, improving
+        // input responsiveness. Fall back to the main-thread path when
+        // any of those capabilities is missing.
         var useWorker = !!(Guacamole.WorkerClient
                 && $window.Worker
                 && $window.OffscreenCanvas
-                && $window.ImageDecoder
-                && /[?&]worker=1\b/.test($window.location.search));
+                && $window.ImageDecoder);
 
         if (useWorker) {
 
@@ -454,13 +447,6 @@ angular.module('client').factory('ManagedClient', ['$rootScope', '$injector',
                 tunnel    : {
                     type : 'websocket',
                     url  : wsUrl
-                },
-                // Enable verbose worker-side diagnostic logging so
-                // responsiveness and connect-path issues can be traced via
-                // the DevTools console. Remove this block once the worker
-                // path is considered stable.
-                debug : {
-                    logging : true
                 }
             });
             tunnel = client.tunnel;
