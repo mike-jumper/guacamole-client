@@ -103,34 +103,48 @@ Guacamole.InputStream = function(client, index) {
 
                 // Provide any received blocks of data to the ReadableStream
                 // controller, such that they will be read by whatever is
-                // consuming the ReadableStream
+                // consuming the ReadableStream. If the downstream consumer
+                // has already closed or canceled the stream (e.g. an
+                // ImageDecoder that has completed its decode and been
+                // closed), enqueue/close will throw; such throws would
+                // propagate out of the InputStream's onblob/onend and
+                // poison the parser's instruction dispatch, so they are
+                // deliberately swallowed here.
                 reader.ondata = function dataReceived(data) {
+                    try {
+                        if (controller.byobRequest) {
 
-                    if (controller.byobRequest) {
+                            var view = controller.byobRequest.view;
+                            var length = Math.min(view.byteLength, data.byteLength);
+                            var byobBlock = new Uint8Array(data, 0, length);
 
-                        var view = controller.byobRequest.view;
-                        var length = Math.min(view.byteLength, data.byteLength);
-                        var byobBlock = new Uint8Array(data, 0, length);
+                            view.buffer.set(byobBlock);
+                            controller.byobRequest.respond(length);
 
-                        view.buffer.set(byobBlock);
-                        controller.byobRequest.respond(length);
+                            if (length < data.byteLength) {
+                                controller.enqueue(data.slice(length));
+                            }
 
-                        if (length < data.byteLength) {
-                            controller.enqueue(data.slice(length));
                         }
 
+                        else {
+                            controller.enqueue(new Uint8Array(data));
+                        }
                     }
-
-                    else {
-                        controller.enqueue(new Uint8Array(data));
+                    catch (e) {
+                        // Consumer no longer interested in this stream's data.
                     }
-
                 };
 
                 // Notify the ReadableStream when the end of the stream is
                 // reached
                 reader.onend = function dataComplete() {
-                    controller.close();
+                    try {
+                        controller.close();
+                    }
+                    catch (e) {
+                        // Stream already closed or canceled by consumer.
+                    }
                 };
 
             }

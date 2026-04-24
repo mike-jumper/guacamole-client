@@ -829,6 +829,13 @@ Guacamole.Display = function(stage) {
         var task = scheduleTask(function drawDecodedBlob() {
             if (image && image.width && image.height)
                 layer.drawImage(x, y, image);
+            // Release any underlying GPU/decoder resources held by the
+            // decoded image. Browsers do not reclaim this memory until
+            // close() is explicitly called (e.g. on ImageBitmap or
+            // VideoFrame), so letting the wrapper be merely GC'd would
+            // accumulate memory over time.
+            if (image && typeof image.close === 'function')
+                image.close();
         }, true);
 
         // Decode the blob asynchronously and unblock the task once complete
@@ -870,6 +877,13 @@ Guacamole.Display = function(stage) {
         var task = scheduleTask(function drawDecodedStream() {
             if (decodedFrame)
                 layer.drawImage(x, y, decodedFrame);
+            // Release any underlying GPU/decoder resources held by the
+            // decoded image. VideoFrame (from ImageDecoder) in particular
+            // is not reclaimed by ordinary garbage collection and must be
+            // closed explicitly to prevent memory from growing unbounded
+            // over the lifetime of a session.
+            if (decodedFrame && typeof decodedFrame.close === 'function')
+                decodedFrame.close();
         }, true);
 
         // Decode the incoming stream asynchronously and unblock the task
@@ -909,6 +923,14 @@ Guacamole.Display = function(stage) {
             // Draw the image only if it loaded without errors
             if (image && image.width && image.height)
                 layer.drawImage(x, y, image);
+
+            // Release any underlying GPU/decoder resources held by the
+            // decoded image. For HTMLImageElement (the DOM-backed path),
+            // close is absent and this is a no-op; for VideoFrame (the
+            // worker-backed path via ImageDecoder), this is required to
+            // prevent memory from growing unbounded over a session.
+            if (image && typeof image.close === 'function')
+                image.close();
 
         }, true);
 
@@ -2266,8 +2288,28 @@ Guacamole.Display.DOMStage = function DOMStage() {
                 data: stream.toReadableStream()
             });
 
-            return imageDecoder.decode({ completeFramesOnly: true })
-                    .then(function bitmapLoaded(result) { return result.image; });
+            // ImageDecoder.completed rejects with "Closed decoder" if
+            // close() is called before it has finished processing its
+            // input stream. Absorb that rejection with a no-op handler
+            // so it doesn't surface as an uncaught promise rejection.
+            if (imageDecoder.completed
+                    && typeof imageDecoder.completed.catch === 'function')
+                imageDecoder.completed.catch(function ignoreCompletedRejection() {});
+
+            // Explicitly close the decoder once decoding has resolved
+            // (or failed) so its internal buffers and backend resources
+            // are released immediately rather than waiting for garbage
+            // collection, which never reclaims them.
+            return imageDecoder.decode({ completeFramesOnly: true }).then(
+                function bitmapLoaded(result) {
+                    imageDecoder.close();
+                    return result.image;
+                },
+                function decodeFailed() {
+                    imageDecoder.close();
+                    return null;
+                }
+            );
 
         }
 

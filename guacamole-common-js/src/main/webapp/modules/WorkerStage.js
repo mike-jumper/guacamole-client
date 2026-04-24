@@ -284,9 +284,7 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
             data: parsed.bytes
         });
 
-        return decoder.decode({ completeFramesOnly: true })
-                .then(function decoded(result) { return result.image; },
-                      function decodeFailed() { return null; });
+        return decodeAndClose(decoder);
 
     };
 
@@ -301,9 +299,7 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
             data: blob.stream()
         });
 
-        return decoder.decode({ completeFramesOnly: true })
-                .then(function decoded(result) { return result.image; },
-                      function decodeFailed() { return null; });
+        return decodeAndClose(decoder);
 
     };
 
@@ -326,11 +322,44 @@ Guacamole.Display.WorkerStage = function WorkerStage(port) {
             data: stream.toReadableStream()
         });
 
-        return decoder.decode({ completeFramesOnly: true })
-                .then(function decoded(result) { return result.image; },
-                      function decodeFailed() { return null; });
+        return decodeAndClose(decoder);
 
     };
+
+    /**
+     * Decodes a single complete frame from the given ImageDecoder,
+     * explicitly closing the decoder once the decode operation has
+     * resolved (or failed). Closing is required to release the
+     * decoder's internal buffers and backend resources; browsers do not
+     * reclaim these via ordinary garbage collection.
+     *
+     * @private
+     * @param {!ImageDecoder} decoder
+     * @returns {!Promise.<?VideoFrame>}
+     */
+    function decodeAndClose(decoder) {
+
+        // ImageDecoder exposes a .completed promise that rejects with
+        // "Closed decoder" if the decoder is closed before its input
+        // stream has been fully processed. Closing here is eager (once
+        // the single complete frame we requested has been returned), so
+        // the completed promise will almost always reject. Attach a
+        // no-op handler so that rejection isn't surfaced as an uncaught
+        // promise rejection.
+        if (decoder.completed && typeof decoder.completed.catch === 'function')
+            decoder.completed.catch(function ignoreCompletedRejection() {});
+
+        return decoder.decode({ completeFramesOnly: true }).then(
+            function decoded(result) {
+                decoder.close();
+                return result.image;
+            },
+            function decodeFailed() {
+                decoder.close();
+                return null;
+            }
+        );
+    }
 
     this.playVideo = function playVideo(layer, mimetype, duration, url) {
 
